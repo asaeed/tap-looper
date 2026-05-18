@@ -79,3 +79,32 @@ TEST(AudioEngine, LoopSampleEnabledAfterFirstRecording) {
     ASSERT_EQ(s.sample_count, 1);
     EXPECT_TRUE(s.samples[0].enabled);   // LOOP bank → enabled on stop
 }
+
+TEST(AudioEngine, SubBarSamplePlaysAtRecordedOffset) {
+    AudioEngine e;
+    // Record a 1-second master bar
+    Command rec1{}; rec1.type = CommandType::StartRecording; rec1.bank = 0;
+    e.submit(rec1); tick(e, 256);
+    tick(e, 48000, 0.0f);  // 1 second of silence
+    Command stop1{}; stop1.type = CommandType::StopRecording;
+    e.submit(stop1); tick(e, 256);
+
+    auto s1 = e.snapshot();
+    ASSERT_GT(s1.master_bar_frames, 47000u);
+    ASSERT_LT(s1.master_bar_frames, 49000u);
+
+    // Now record a short sample 500ms into the bar
+    tick(e, 24000); // advance 0.5s
+    Command rec2{}; rec2.type = CommandType::StartRecording; rec2.bank = 1;
+    e.submit(rec2); tick(e, 256);
+    tick(e, 9600, 1.0f);    // 200ms of audio (minimum to pass validation)
+    Command stop2{}; stop2.type = CommandType::StopRecording;
+    e.submit(stop2); tick(e, 256);
+
+    auto s2 = e.snapshot();
+    ASSERT_EQ(s2.sample_count, 2);
+    // Sample #2 should have recorded_offset_in_bar > 0 (it was recorded mid-bar)
+    const SampleState& sub = s2.samples[1];
+    EXPECT_GT(sub.recorded_offset_in_bar, 20000u);
+    EXPECT_LT(sub.recorded_offset_in_bar, 30000u);
+}
