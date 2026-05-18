@@ -34,7 +34,7 @@ val collectNativeLib by tasks.registering(Copy::class) {
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(21)
 }
 
 tasks.named("processResources") {
