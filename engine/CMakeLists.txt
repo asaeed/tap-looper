@@ -4,6 +4,18 @@ project(tap_looper_engine CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# On macOS with Command Line Tools, /usr/bin/clang++ does not auto-include
+# the libc++ headers — adding them explicitly via xcrun.
+if(APPLE AND NOT ANDROID)
+    execute_process(COMMAND xcrun --show-sdk-path
+                    OUTPUT_VARIABLE TL_MACOS_SDK_PATH
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    RESULT_VARIABLE TL_XCRUN_RESULT)
+    if(TL_XCRUN_RESULT EQUAL 0 AND EXISTS "${TL_MACOS_SDK_PATH}/usr/include/c++/v1")
+        add_compile_options(-isystem "${TL_MACOS_SDK_PATH}/usr/include/c++/v1")
+    endif()
+endif()
+
 option(TL_BUILD_TESTS "Build engine gtest suite" ON)
 
 set(TL_ENGINE_SOURCES
