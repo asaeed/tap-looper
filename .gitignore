@@ -1,0 +1,10 @@
+.gradle/
+build/
+**/build/
+**/.cxx/
+local.properties
+*.iml
+.idea/
+*.log
+.DS_Store
+.superpowers/
