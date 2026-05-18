@@ -30,6 +30,7 @@ fun BankGrid(
     recording: Boolean,
     focusedBank: Int,
     bankColors: List<Color>,
+    pulsePhase: Float,
     onBankCallbacks: (bankId: Int) -> BankCallbacks,
 ) {
     val start = page * 4
@@ -38,7 +39,7 @@ fun BankGrid(
             for (i in 0..1) {
                 val bankId = start + i
                 BankCell(banks, samples, bankId, bankColors, bpm, recording, focusedBank,
-                         onBankCallbacks, Modifier.weight(1f).fillMaxHeight())
+                         pulsePhase, onBankCallbacks, Modifier.weight(1f).fillMaxHeight())
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -46,7 +47,7 @@ fun BankGrid(
             for (i in 2..3) {
                 val bankId = start + i
                 BankCell(banks, samples, bankId, bankColors, bpm, recording, focusedBank,
-                         onBankCallbacks, Modifier.weight(1f).fillMaxHeight())
+                         pulsePhase, onBankCallbacks, Modifier.weight(1f).fillMaxHeight())
             }
         }
     }
@@ -61,6 +62,7 @@ private fun BankCell(
     bpm: Float,
     recording: Boolean,
     focusedBank: Int,
+    pulsePhase: Float,
     onBankCallbacks: (Int) -> BankCallbacks,
     modifier: Modifier,
 ) {
@@ -73,6 +75,7 @@ private fun BankCell(
             color = bankColors[bankId],
             recording = recording,
             bpm = bpm,
+            pulsePhase = pulsePhase,
             isFocused = focusedBank == bankId,
             onTapEmpty = cb.onTapEmpty,
             onAction = cb.onAction,

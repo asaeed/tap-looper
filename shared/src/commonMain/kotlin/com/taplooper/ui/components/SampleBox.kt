@@ -12,20 +12,37 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.taplooper.ui.theme.LocalTLTheme
+import kotlin.math.PI
+import kotlin.math.sin
 
 enum class SampleVisualState { Idle, Playing, Recording, Muted }
 
 @Composable
-fun SampleBox(state: SampleVisualState, color: Color, bpm: Float, modifier: Modifier = Modifier) {
+fun SampleBox(
+    state: SampleVisualState,
+    color: Color,
+    bpm: Float,
+    pulsePhase: Float = 0f,            // 0..1 phase shared by all playing boxes
+    modifier: Modifier = Modifier
+) {
     val theme = LocalTLTheme.current
-    val pulseHz = if (bpm > 0) bpm / 60f else 1f
-    val durationMs = ((1000f / pulseHz).coerceAtLeast(150f)).toInt()
-    val transition = rememberInfiniteTransition(label = "pulse")
-    val scale by transition.animateFloat(
-        initialValue = 1f, targetValue = theme.pulseScale,
-        animationSpec = infiniteRepeatable(tween(durationMs / 2, easing = LinearEasing), RepeatMode.Reverse),
-        label = "scale"
+
+    // Recording boxes pulse independently at ~3 Hz for eye-catching effect.
+    val recordingTransition = rememberInfiniteTransition(label = "rec-pulse")
+    val recordingPhase by recordingTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(300, easing = LinearEasing), RepeatMode.Restart),
+        label = "rec-phase"
     )
+
+    val phase = when (state) {
+        SampleVisualState.Recording -> recordingPhase
+        SampleVisualState.Playing   -> pulsePhase
+        else                        -> 0f
+    }
+    val pulseAmount = 0.5f + 0.5f * sin(phase * 2f * PI.toFloat())
+    // pulseAmount in [0..1]
+    val scaleTarget = 1f + (theme.pulseScale - 1f) * pulseAmount
 
     val (bg, border, alpha) = when (state) {
         SampleVisualState.Idle      -> Triple(color.copy(alpha = 0.15f), color, 1f)
@@ -34,12 +51,18 @@ fun SampleBox(state: SampleVisualState, color: Color, bpm: Float, modifier: Modi
         SampleVisualState.Muted     -> Triple(Color.Transparent, color, 0.4f)
     }
 
+    val elevation = when (state) {
+        SampleVisualState.Playing   -> theme.pulseGlowDp * pulseAmount
+        SampleVisualState.Recording -> 16.dp * pulseAmount
+        else                        -> 0.dp
+    }
+
     Box(
         modifier
             .size(width = 50.dp, height = 38.dp)
-            .scale(if (state == SampleVisualState.Playing || state == SampleVisualState.Recording) scale else 1f)
+            .scale(if (state == SampleVisualState.Playing || state == SampleVisualState.Recording) scaleTarget else 1f)
             .shadow(
-                elevation = if (state == SampleVisualState.Playing) theme.pulseGlowDp else 0.dp,
+                elevation = elevation,
                 shape = RoundedCornerShape(4.dp),
                 ambientColor = color, spotColor = color
             )

@@ -184,6 +184,18 @@ struct AudioEngine::Impl {
             ss.recorded_length_frames = s.recorded_length_frames;
             ss.recorded_offset_in_bar = s.recorded_offset_in_bar;
         }
+        // Also mirror the active recording (if any) so the UI shows the box during recording
+        if (active_recording && n < kMaxSamples) {
+            const Sample& s = *active_recording;
+            SampleState& ss = state.samples[n];
+            ss.id = s.id; ss.bank = s.bank;
+            ss.volume = s.volume; ss.reverse = s.reverse; ss.speed = s.speed;
+            ss.enabled = s.enabled; ss.playing = s.playing; ss.recording = s.recording;
+            ss.position_x = s.position_x; ss.position_y = s.position_y;
+            ss.recorded_length_frames = s.recorded_length_frames;
+            ss.recorded_offset_in_bar = s.recorded_offset_in_bar;
+            n++;
+        }
         state.sample_count = n;
         state.bpm = float(derive_bpm(state.master_bar_frames, state.beats_per_bar, sample_rate));
         state.version++;

@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.taplooper.bridge.BankStateKt
@@ -33,6 +34,7 @@ fun Bank(
     onSampleDragMove: (SampleStateKt, Offset) -> Unit,
     onSampleDragEnd: (SampleStateKt, Offset) -> Unit,
     onVolumeChange: (Float) -> Unit,
+    pulsePhase: Float,
     isFocused: Boolean,
 ) {
     BoxWithConstraints(
@@ -69,6 +71,7 @@ fun Bank(
                         s = s,
                         color = color,
                         bpm = bpm,
+                        pulsePhase = pulsePhase,
                         widthPx = widthPx,
                         heightPx = heightPx,
                         muted = bankState.muted,
@@ -91,6 +94,7 @@ fun Bank(
 private fun SampleAt(
     s: SampleStateKt,
     color: Color, bpm: Float,
+    pulsePhase: Float,
     widthPx: Float, heightPx: Float,
     muted: Boolean, oneShot: Boolean,
     onTap: () -> Unit, onLongPress: () -> Unit,
@@ -106,8 +110,11 @@ private fun SampleAt(
         s.playing && !muted   -> SampleVisualState.Playing
         else -> SampleVisualState.Idle
     }
-    val xPx = (s.positionX * widthPx - 25f).toInt()
-    val yPx = (s.positionY * heightPx - 19f).toInt()
+    val density = LocalDensity.current
+    val halfWidthPx = with(density) { 25.dp.toPx() }
+    val halfHeightPx = with(density) { 19.dp.toPx() }
+    val xPx = (s.positionX * widthPx - halfWidthPx).toInt()
+    val yPx = (s.positionY * heightPx - halfHeightPx).toInt()
     Box(
         Modifier
             .offset { IntOffset(xPx, yPx) }
@@ -117,6 +124,6 @@ private fun SampleAt(
                 enabled = enabled,
             )
     ) {
-        SampleBox(state = state, color = color, bpm = bpm)
+        SampleBox(state = state, color = color, bpm = bpm, pulsePhase = pulsePhase)
     }
 }

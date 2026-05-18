@@ -16,9 +16,34 @@ val buildNativeLib by tasks.registering(Exec::class) {
     val buildDir = file("$cppDir/build")
     workingDir = cppDir
     outputs.dir(buildDir)
-    inputs.files(fileTree(cppDir) { exclude("build/**") })
-    commandLine("sh", "-c",
-        "cmake -S . -B build && cmake --build build")
+    inputs.files(
+        fileTree(cppDir) { exclude("build/**") },
+        fileTree(file("../engine/src")),
+        file("../engine/CMakeLists.txt"),
+    )
+    // Resolve the JDK used by this toolchain so CMake's FindJNI can locate headers/libs.
+    // javaLauncher gives us the exact JDK Gradle provisioned for jvmToolchain(21).
+    val launcher = javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) }
+    val jdkHome = launcher.map { it.executablePath.asFile.parentFile.parentFile.canonicalPath }
+    doFirst {
+        val jh = jdkHome.get()
+        val os = org.gradle.internal.os.OperatingSystem.current()
+        val jniPlatform = when {
+            os.isMacOsX  -> "darwin"
+            os.isLinux   -> "linux"
+            os.isWindows -> "win32"
+            else         -> "linux"
+        }
+        val cmakeArgs = listOf(
+            "cmake", "-S", ".", "-B", "build",
+            "-DJAVA_INCLUDE_PATH=$jh/include",
+            "-DJAVA_INCLUDE_PATH2=$jh/include/$jniPlatform",
+            "-DJAVA_AWT_INCLUDE_PATH=$jh/include",
+            "-DJAVA_JVM_LIBRARY=$jh/lib/server/libjvm.${if (os.isMacOsX) "dylib" else if (os.isWindows) "dll" else "so"}",
+            "-DJAVA_AWT_LIBRARY=$jh/lib/libjawt.${if (os.isMacOsX) "dylib" else if (os.isWindows) "dll" else "so"}",
+        ).joinToString(" ")
+        commandLine("sh", "-c", "$cmakeArgs && cmake --build build")
+    }
 }
 
 // Copy the built .dylib into resources so System.loadLibrary picks it up at runtime.

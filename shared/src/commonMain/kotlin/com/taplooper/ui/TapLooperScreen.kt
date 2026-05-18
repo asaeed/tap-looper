@@ -1,5 +1,6 @@
 package com.taplooper.ui
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -25,6 +26,15 @@ fun TapLooperScreen(vm: AppViewModel) {
     var page by remember { mutableIntStateOf(0) }
     var modalSample by remember { mutableStateOf<SampleStateKt?>(null) }
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
+
+    val pulseHz = if (state.bpm > 0) state.bpm / 60f else 1f
+    val durationMs = ((1000f / pulseHz).coerceAtLeast(150f)).toInt()
+    val pulseTransition = rememberInfiniteTransition(label = "global-pulse")
+    val pulsePhase by pulseTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(durationMs, easing = LinearEasing), RepeatMode.Restart),
+        label = "phase"
+    )
 
     val theme = TLTheme()
     CompositionLocalProvider(LocalTLTheme provides theme) {
@@ -67,6 +77,7 @@ fun TapLooperScreen(vm: AppViewModel) {
                             recording = state.recording,
                             focusedBank = state.focusedBank,
                             bankColors = theme.bankColors,
+                            pulsePhase = pulsePhase,
                         ) { bankId ->
                             BankCallbacks(
                                 onTapEmpty = { x, y -> vm.startRecording(bankId, x, y) },
