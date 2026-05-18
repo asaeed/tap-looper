@@ -21,6 +21,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "tap-looper"
 
-// include(":shared")
+include(":shared")
 // include(":desktop")
 // :app (Android) will be added in Phase MP-D once SDK is installed
