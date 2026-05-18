@@ -153,6 +153,16 @@ struct AudioEngine::Impl {
     }
 
     void publish_state() {
+        // Compute 'playing' indicator for each sample before mirroring to state
+        for (auto& up : samples) {
+            BankMode m = state.banks[up->bank].mode;
+            if (m == BankMode::Loop) {
+                up->playing = up->enabled && !state.banks[up->bank].muted;
+            } else {
+                // up->playing is already managed by mixer (set to false when one_shot finishes)
+            }
+        }
+
         // mirror samples vector into state.samples
         int n = std::min(int(samples.size()), kMaxSamples);
         for (int i = 0; i < n; ++i) {
