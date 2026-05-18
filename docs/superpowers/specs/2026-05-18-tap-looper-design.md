@@ -3,16 +3,16 @@
 **Date:** 2026-05-18
 **Project root:** `~/claude/tap-looper`
 
-A live looping app for Android (with a shared C++ audio core that can be ported to iOS later). Phone-as-interface for an advanced sampling looper: real-time recording and playback of loops and one-shot samples, organized in banks, with first-loop-defines-grid quantization and BPM-driven visual pulse.
+A live looping app for Android **and macOS desktop** (with a shared C++ audio core that can be ported to iOS and Windows/Linux later). Phone-as-interface for an advanced sampling looper: real-time recording and playback of loops and one-shot samples, organized in banks, with first-loop-defines-grid quantization and BPM-driven visual pulse.
 
 ---
 
 ## Goals
 
-- **Real-time latency**: round-trip ≤ 20 ms on a modern Android device; no audible gap between loop iterations.
-- **Hands-free recording**: any tap on the screen stops an in-progress recording (so the user can grab the phone, hit the screen with any finger, and keep playing their instrument).
+- **Real-time latency**: round-trip ≤ 20 ms on a modern device; no audible gap between loop iterations.
+- **Hands-free recording**: any tap (touch on phone, click/touchpad on desktop) on the screen stops an in-progress recording.
 - **Up to 8 banks**, each containing many samples, with bank-level mode (loop or one-shot) and live mixing.
-- **Cross-platform path**: Android UI ships first; a shared C++ engine makes future iOS port realistic.
+- **Cross-platform single-codebase UI**: Compose Multiplatform shares the same Kotlin/Compose UI across Android + Desktop (Mac/Win/Linux). iOS is a future target via the same framework.
 - **Themeable visuals**: v1 ships with one default theme ("Neon Arcade"); additional themes added later.
 
 ## Non-goals (v1)
@@ -72,10 +72,10 @@ These are explicit deferrals — engineering does not need to plan for them in v
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Android UI | Kotlin + Jetpack Compose | Declarative, animation-friendly, native Canvas for sample boxes |
-| Audio I/O | Oboe (Android) / AVAudioEngine (iOS, later) | Round-trip latency target: ≤ 20 ms on a Pixel-class device |
-| Audio engine | C++17, NDK + CMake | Portable; runs on host for unit tests |
-| Bridge | JNI (slim) | Kotlin → engine: commands; engine → Kotlin: state events via Flow |
+| UI | Kotlin + Compose Multiplatform | Single codebase targets Android + Desktop (JVM) + future iOS |
+| Audio I/O | Oboe (Android) / miniaudio (Mac/Win/Linux Desktop) / AVAudioEngine (iOS, later) | Single-header miniaudio wraps CoreAudio on Mac, WASAPI on Win, ALSA/PulseAudio on Linux. Round-trip latency target: ≤ 20 ms |
+| Audio engine | C++17, CMake | Portable; runs on host for unit tests; same engine on every platform |
+| Bridge | JNI (slim) | Kotlin → engine: commands; engine → Kotlin: state snapshots (no PCM crosses) |
 | Animations | Compose animations | Pulse driven by BPM-derived rate |
 | Persistence | None (v1) | In-memory only |
 | Testing | gtest (engine, host-runnable), Compose UI tests | Engine validatable without a device |
