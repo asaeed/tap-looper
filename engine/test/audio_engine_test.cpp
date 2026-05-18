@@ -170,3 +170,20 @@ TEST(AudioEngine, DeleteSampleRemovesIt) {
     e.submit(del); tick(e, 64);
     EXPECT_EQ(e.snapshot().sample_count, 0);
 }
+
+TEST(AudioEngine, CaptureLastLoopCreatesSample) {
+    AudioEngine e;
+    Command rec{}; rec.type = CommandType::StartRecording; rec.bank = 0;
+    e.submit(rec); tick(e, 256);
+    tick(e, 48000 / 2, 0.5f);
+    Command stop{}; stop.type = CommandType::StopRecording;
+    e.submit(stop); tick(e, 256);
+    // Now feed some input into rolling buffer
+    tick(e, 24000, 0.7f);
+    Command cap{}; cap.type = CommandType::CaptureLastLoop; cap.bank = 1;
+    e.submit(cap); tick(e, 64);
+    auto s = e.snapshot();
+    EXPECT_EQ(s.sample_count, 2);
+    EXPECT_EQ(s.samples[1].bank, 1);
+    EXPECT_GT(s.samples[1].recorded_length_frames, 0u);
+}

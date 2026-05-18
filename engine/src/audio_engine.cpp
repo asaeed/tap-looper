@@ -56,6 +56,7 @@ struct AudioEngine::Impl {
             }
             if (state.master_bar_frames == 0) {
                 state.master_bar_frames = len;
+                rolling = RollingBuffer(state.master_bar_frames, kChannels);
             }
             // For a LOOP-mode bank, mark enabled so it starts playing.
             BankMode m = state.banks[active_recording->bank].mode;
@@ -123,6 +124,23 @@ struct AudioEngine::Impl {
                 // Non-destructive: PCM and recorded_offset_in_bar untouched.
                 break;
             }
+            state.focused_bank = c.bank;
+            break;
+        }
+        case CommandType::CaptureLastLoop: {
+            if (state.master_bar_frames == 0) break; // no L yet
+            Frames len = state.master_bar_frames;
+            auto sample = std::make_unique<Sample>(next_id++, c.bank, kMaxRecFrames, kChannels);
+            sample->position_x = 0.5f; sample->position_y = 0.5f;
+            sample->recorded_offset_in_bar = global_play_head;
+            sample->recording = true;
+            std::vector<float> buf(size_t(len) * kChannels);
+            rolling.read_last(buf.data(), len);
+            sample->append(buf.data(), len);
+            sample->recording = false;
+            if (state.banks[c.bank].mode == BankMode::Loop) sample->enabled = true;
+            samples.push_back(std::move(sample));
+            state.sample_count = int(samples.size());
             state.focused_bank = c.bank;
             break;
         }
