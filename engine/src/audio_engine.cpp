@@ -19,6 +19,7 @@ struct AudioEngine::Impl {
     std::unique_ptr<Sample> active_recording;
     SampleId next_id{1};
     int sample_rate{kSampleRate};
+    Frames global_play_head{0};   // wraps modulo master_bar_frames once set
 
     Impl() { init_default_state(state); publisher.publish(state); }
 
@@ -34,8 +35,7 @@ struct AudioEngine::Impl {
             // recorded_offset_in_bar captured at recording start
             if (state.master_bar_frames > 0) {
                 // current play position mod L
-                // (engine.global_play_head will be added in Task 11; for now use 0)
-                active_recording->recorded_offset_in_bar = 0;
+                active_recording->recorded_offset_in_bar = global_play_head;
             }
             state.recording = true;
             state.recording_sample_id = active_recording->id;
@@ -109,10 +109,16 @@ void AudioEngine::process(const float* in, float* out, int frame_count) {
         impl_->state.recording_duration_frames = impl_->active_recording->recorded_length_frames;
     }
 
-    // 4. Zero output (mixer in Task 12)
+    // 4. Advance global play head
+    if (impl_->state.master_bar_frames > 0) {
+        impl_->global_play_head =
+            (impl_->global_play_head + Frames(frame_count)) % impl_->state.master_bar_frames;
+    }
+
+    // 5. Zero output (mixer in Task 12)
     std::memset(out, 0, sizeof(float) * size_t(frame_count) * kChannels);
 
-    // 5. Publish state
+    // 6. Publish state
     impl_->publish_state();
 }
 

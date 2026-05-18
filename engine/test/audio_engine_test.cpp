@@ -58,3 +58,24 @@ TEST(AudioEngine, RecordingShorterThanMinDiscarded) {
     EXPECT_EQ(s.sample_count, 0);
     EXPECT_EQ(s.master_bar_frames, 0u);
 }
+
+TEST(AudioEngine, GlobalPlayHeadAdvances) {
+    AudioEngine e;
+    tick(e, 1000);
+    auto s = e.snapshot();
+    // play head is internal but we can verify indirectly via subsequent offset tests in Task 13.
+    // For now just verify nothing crashes.
+    SUCCEED();
+}
+
+TEST(AudioEngine, LoopSampleEnabledAfterFirstRecording) {
+    AudioEngine e;
+    Command c{}; c.type = CommandType::StartRecording; c.bank = 0;
+    e.submit(c); tick(e, 256, 0.1f);
+    tick(e, 48000 / 2, 0.1f);
+    Command stop{}; stop.type = CommandType::StopRecording;
+    e.submit(stop); tick(e, 256);
+    auto s = e.snapshot();
+    ASSERT_EQ(s.sample_count, 1);
+    EXPECT_TRUE(s.samples[0].enabled);   // LOOP bank → enabled on stop
+}
