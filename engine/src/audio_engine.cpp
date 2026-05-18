@@ -92,6 +92,44 @@ struct AudioEngine::Impl {
             }
             break;
         }
+        case CommandType::SetBankMute:    state.banks[c.bank].muted = c.bvalue; break;
+        case CommandType::SetBankVolume:  state.banks[c.bank].volume = c.fvalue; break;
+        case CommandType::SetBankMode:    state.banks[c.bank].mode = c.ivalue == 1 ? BankMode::OneShot : BankMode::Loop; break;
+
+        case CommandType::SetSampleVolume: {
+            for (auto& up : samples) if (up->id == c.sample_id) { up->volume = c.fvalue; break; }
+            break;
+        }
+        case CommandType::SetSampleReverse: {
+            for (auto& up : samples) if (up->id == c.sample_id) { up->reverse = c.bvalue; break; }
+            break;
+        }
+        case CommandType::SetSampleSpeed: {
+            for (auto& up : samples) if (up->id == c.sample_id) { up->speed = Speed(c.ivalue); break; }
+            break;
+        }
+        case CommandType::DeleteSample: {
+            samples.erase(std::remove_if(samples.begin(), samples.end(),
+                [&](const std::unique_ptr<Sample>& s){ return s->id == c.sample_id; }), samples.end());
+            state.sample_count = int(samples.size());
+            break;
+        }
+        case CommandType::MoveSample: {
+            for (auto& up : samples) {
+                if (up->id != c.sample_id) continue;
+                up->bank = c.bank;
+                up->position_x = c.fx;
+                up->position_y = c.fy;
+                // Non-destructive: PCM and recorded_offset_in_bar untouched.
+                break;
+            }
+            state.focused_bank = c.bank;
+            break;
+        }
+        case CommandType::SetBeatsPerBar: {
+            state.beats_per_bar = c.ivalue;
+            break;
+        }
         default: break; // other commands implemented in later tasks
         }
     }

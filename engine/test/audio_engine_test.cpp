@@ -130,3 +130,43 @@ TEST(AudioEngine, TapOneShotSampleTriggersPlayback) {
     auto s2 = e.snapshot();
     EXPECT_FALSE(s2.samples[0].enabled);   // toggled off
 }
+
+TEST(AudioEngine, SetBankMuteReflectsInSnapshot) {
+    AudioEngine e;
+    Command c{}; c.type = CommandType::SetBankMute; c.bank = 2; c.bvalue = true;
+    e.submit(c); tick(e, 64);
+    EXPECT_TRUE(e.snapshot().banks[2].muted);
+}
+
+TEST(AudioEngine, MoveSampleChangesBankNotPCM) {
+    AudioEngine e;
+    Command rec{}; rec.type = CommandType::StartRecording; rec.bank = 0;
+    e.submit(rec); tick(e, 256);
+    tick(e, 48000 / 2);
+    Command stop{}; stop.type = CommandType::StopRecording;
+    e.submit(stop); tick(e, 256);
+    auto s = e.snapshot();
+    SampleId id = s.samples[0].id;
+    Frames orig_offset = s.samples[0].recorded_offset_in_bar;
+    Frames orig_len = s.samples[0].recorded_length_frames;
+
+    Command mv{}; mv.type = CommandType::MoveSample; mv.sample_id = id; mv.bank = 3; mv.fx = 0.2f; mv.fy = 0.3f;
+    e.submit(mv); tick(e, 64);
+    auto s2 = e.snapshot();
+    EXPECT_EQ(s2.samples[0].bank, 3);
+    EXPECT_EQ(s2.samples[0].recorded_offset_in_bar, orig_offset);
+    EXPECT_EQ(s2.samples[0].recorded_length_frames, orig_len);
+}
+
+TEST(AudioEngine, DeleteSampleRemovesIt) {
+    AudioEngine e;
+    Command rec{}; rec.type = CommandType::StartRecording; rec.bank = 0;
+    e.submit(rec); tick(e, 256);
+    tick(e, 48000 / 2);
+    Command stop{}; stop.type = CommandType::StopRecording;
+    e.submit(stop); tick(e, 256);
+    auto s = e.snapshot();
+    Command del{}; del.type = CommandType::DeleteSample; del.sample_id = s.samples[0].id;
+    e.submit(del); tick(e, 64);
+    EXPECT_EQ(e.snapshot().sample_count, 0);
+}
