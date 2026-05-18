@@ -6,6 +6,7 @@
 
 using namespace tl;
 
+
 TEST(Mixer, EnabledLoopSampleAtOffsetZero_PlaysFromStart) {
     // Create a sample with known PCM, 4 frames mono (for simplicity treat as stereo with channels=2)
     Sample s(1, 0, /*cap=*/8, /*channels=*/2);
@@ -62,4 +63,12 @@ TEST(Mixer, VolumeScaling) {
     std::vector<float> out(8, 0.f);
     mix(samples, banks, 4, 0, 4, out.data());
     EXPECT_FLOAT_EQ(out[0], 0.25f); // 1 * 0.5 (sample) * 0.5 (bank)
+}
+
+TEST(Mixer, NearestMultipleOfLRoundsCorrectly) {
+    EXPECT_EQ(nearest_multiple_of_L(4, 4), Frames(4));
+    EXPECT_EQ(nearest_multiple_of_L(5, 4), Frames(8));   // multi-bar min = 2L = 8
+    EXPECT_EQ(nearest_multiple_of_L(6, 4), Frames(8));
+    EXPECT_EQ(nearest_multiple_of_L(10, 4), Frames(8));  // 10 closer to 8 than 12
+    EXPECT_EQ(nearest_multiple_of_L(11, 4), Frames(12)); // 11 closer to 12
 }

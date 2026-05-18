@@ -18,4 +18,6 @@ void mix(const std::vector<Sample*>& samples,
          int frame_count,
          float* out);
 
+Frames nearest_multiple_of_L(Frames sample_len, Frames L);
+
 } // namespace tl
