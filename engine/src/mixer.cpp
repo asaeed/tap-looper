@@ -4,9 +4,26 @@
 namespace tl {
 
 namespace {
-inline float read_sample_frame(const Sample& s, Frames frame, int channel) {
-    Frames idx = s.reverse ? (s.recorded_length_frames - 1 - frame) : frame;
-    return s.pcm[idx * s.channels + channel];
+inline float read_sample_lerp(const Sample& s, float position, int channel) {
+    if (position < 0.f) position = 0.f;
+    Frames len = s.recorded_length_frames;
+    if (len == 0) return 0.f;
+    if (position >= float(len - 1)) position = float(len - 1);
+    if (s.reverse) position = float(len - 1) - position;
+    Frames i0 = Frames(position);
+    Frames i1 = std::min<Frames>(i0 + 1, len - 1);
+    float frac = position - float(i0);
+    float a = s.pcm[i0 * s.channels + channel];
+    float b = s.pcm[i1 * s.channels + channel];
+    return a + (b - a) * frac;
+}
+
+inline float speed_ratio(Speed sp) {
+    switch (sp) {
+    case Speed::Half:   return 0.5f;
+    case Speed::Double: return 2.0f;
+    default:            return 1.0f;
+    }
 }
 } // namespace
 
@@ -43,15 +60,16 @@ void mix(const std::vector<Sample*>& samples,
             // ONE-SHOT: play from one_shot_play_pos when playing=true.
             if (!s.playing) continue;
             Sample& sm = const_cast<Sample&>(s);   // mutable advance (RT thread is the only writer)
-            Frames pos = sm.one_shot_play_pos;
+            float pos = float(sm.one_shot_play_pos);
+            float rate = speed_ratio(sm.speed);
             for (int i = 0; i < frame_count; ++i) {
-                if (pos >= sm.recorded_length_frames) { sm.playing = false; break; }
+                if (pos >= float(sm.recorded_length_frames)) { sm.playing = false; break; }
                 for (int c = 0; c < kChannels; ++c) {
-                    out[i * kChannels + c] += read_sample_frame(sm, pos, c) * gain;
+                    out[i * kChannels + c] += read_sample_lerp(sm, pos, c) * gain;
                 }
-                pos++;
+                pos += rate;
             }
-            sm.one_shot_play_pos = pos;
+            sm.one_shot_play_pos = Frames(pos);
             continue;
         }
         if (!s.enabled) continue;
@@ -78,8 +96,9 @@ void mix(const std::vector<Sample*>& samples,
                     }
                 }
                 if (!inside) continue;
+                float pos = float(local) * speed_ratio(s.speed);
                 for (int c = 0; c < kChannels; ++c) {
-                    out[i * kChannels + c] += read_sample_frame(s, local, c) * gain;
+                    out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
                 }
             }
         } else {
@@ -90,9 +109,10 @@ void mix(const std::vector<Sample*>& samples,
             for (int i = 0; i < frame_count; ++i) {
                 Frames absolute = (play_head + Frames(i)) % loop_len;
                 if (absolute >= sample_len) continue; // trailing silence within iteration
-                Frames local = absolute; // reverse handled by read_sample_frame
+                Frames local = absolute; // reverse handled by read_sample_lerp
+                float pos = float(local) * speed_ratio(s.speed);
                 for (int c = 0; c < kChannels; ++c) {
-                    out[i * kChannels + c] += read_sample_frame(s, local, c) * gain;
+                    out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
                 }
             }
         }

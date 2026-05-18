@@ -72,3 +72,29 @@ TEST(Mixer, NearestMultipleOfLRoundsCorrectly) {
     EXPECT_EQ(nearest_multiple_of_L(10, 4), Frames(8));  // 10 closer to 8 than 12
     EXPECT_EQ(nearest_multiple_of_L(11, 4), Frames(12)); // 11 closer to 12
 }
+
+TEST(Mixer, HalfSpeedDoublesPlaybackDuration) {
+    Sample s(1, 0, 8, 2);
+    s.recording = true;
+    float pcm[] = {1,1, 2,2, 3,3, 4,4}; // 4 frames stereo
+    s.append(pcm, 4);
+    s.recording = false;
+    s.enabled = true;
+    s.recorded_offset_in_bar = 0;
+    s.speed = Speed::Half;
+
+    BankState bank{}; bank.mode = BankMode::Loop; bank.volume = 1.0f;
+    BankState banks[kNumBanks];
+    for (int i = 0; i < kNumBanks; ++i) { banks[i] = bank; banks[i].id = i; }
+    std::vector<Sample*> samples = {&s};
+
+    // bar = 8 (sample_len < bar). At Half speed sample takes 8 frames; bar is 8; full window.
+    std::vector<float> out(16, 0.f);  // 8 frames stereo
+    mix(samples, banks, /*bar*/8, /*play_head*/0, /*frame_count*/8, out.data());
+    // frame 0: original frame 0 = 1.0
+    // frame 1: original frame 0.5 = (1 + 2)/2 = 1.5
+    // frame 2: original frame 1 = 2.0
+    // frame 7: original frame 3.5 = (4 + 4)/2 = 4.0 (out of range, clamps to last)
+    EXPECT_FLOAT_EQ(out[0], 1.0f);
+    EXPECT_FLOAT_EQ(out[2], 1.5f);
+}
