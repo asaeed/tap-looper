@@ -3,6 +3,7 @@
 #include "rolling_buffer.h"
 #include "sample.h"
 #include "bpm.h"
+#include "mixer.h"
 #include <memory>
 #include <vector>
 #include <algorithm>
@@ -115,8 +116,15 @@ void AudioEngine::process(const float* in, float* out, int frame_count) {
             (impl_->global_play_head + Frames(frame_count)) % impl_->state.master_bar_frames;
     }
 
-    // 5. Zero output (mixer in Task 12)
+    // 5. Zero output then mix
     std::memset(out, 0, sizeof(float) * size_t(frame_count) * kChannels);
+    {
+        std::vector<Sample*> ptrs;
+        ptrs.reserve(impl_->samples.size());
+        for (auto& up : impl_->samples) ptrs.push_back(up.get());
+        mix(ptrs, impl_->state.banks, impl_->state.master_bar_frames,
+            impl_->global_play_head, frame_count, out);
+    }
 
     // 6. Publish state
     impl_->publish_state();
