@@ -69,6 +69,29 @@ struct AudioEngine::Impl {
             state.recording_sample_id = 0;
             break;
         }
+        case CommandType::TapSample: {
+            for (auto& up : samples) {
+                if (up->id != c.sample_id) continue;
+                BankMode m = state.banks[up->bank].mode;
+                if (m == BankMode::Loop) {
+                    up->enabled = !up->enabled;
+                } else {
+                    up->one_shot_play_pos = 0;
+                    up->playing = true;
+                }
+                break;
+            }
+            break;
+        }
+        case CommandType::FireAllInBank: {
+            for (auto& up : samples) {
+                if (up->bank != c.bank) continue;
+                if (state.banks[c.bank].mode != BankMode::OneShot) continue;
+                up->one_shot_play_pos = 0;
+                up->playing = true;
+            }
+            break;
+        }
         default: break; // other commands implemented in later tasks
         }
     }

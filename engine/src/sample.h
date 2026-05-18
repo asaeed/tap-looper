@@ -20,6 +20,7 @@ struct Sample {
     bool enabled;       // LOOP mode: whether loop is playing
     bool playing;       // ONE-SHOT: currently firing; or LOOP: currently audible iteration
     bool recording;
+    Frames one_shot_play_pos;  // current playback position when ONE-SHOT is firing; advances each block
     float position_x, position_y;
 
     int channels;

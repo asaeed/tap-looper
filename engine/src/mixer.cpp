@@ -36,12 +36,25 @@ void mix(const std::vector<Sample*>& samples,
         const Sample& s = *sp;
         const BankState& b = banks[s.bank];
         if (b.muted) continue;
-        bool is_loop = (b.mode == BankMode::Loop);
-        if (!is_loop) continue;          // ONE-SHOT handled in Task 15
-        if (!s.enabled) continue;
         if (s.recorded_length_frames == 0) continue;
-
         float gain = s.volume * b.volume;
+        bool is_loop = (b.mode == BankMode::Loop);
+        if (!is_loop) {
+            // ONE-SHOT: play from one_shot_play_pos when playing=true.
+            if (!s.playing) continue;
+            Sample& sm = const_cast<Sample&>(s);   // mutable advance (RT thread is the only writer)
+            Frames pos = sm.one_shot_play_pos;
+            for (int i = 0; i < frame_count; ++i) {
+                if (pos >= sm.recorded_length_frames) { sm.playing = false; break; }
+                for (int c = 0; c < kChannels; ++c) {
+                    out[i * kChannels + c] += read_sample_frame(sm, pos, c) * gain;
+                }
+                pos++;
+            }
+            sm.one_shot_play_pos = pos;
+            continue;
+        }
+        if (!s.enabled) continue;
 
         // For sub-bar samples, fire at `recorded_offset_in_bar` every bar.
         Frames offset = s.recorded_offset_in_bar;

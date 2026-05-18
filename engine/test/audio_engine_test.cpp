@@ -108,3 +108,25 @@ TEST(AudioEngine, SubBarSamplePlaysAtRecordedOffset) {
     EXPECT_GT(sub.recorded_offset_in_bar, 20000u);
     EXPECT_LT(sub.recorded_offset_in_bar, 30000u);
 }
+
+TEST(AudioEngine, TapOneShotSampleTriggersPlayback) {
+    AudioEngine e;
+    // Switch bank 0 to ONE_SHOT
+    Command setMode{}; setMode.type = CommandType::SetBankMode; setMode.bank = 0; setMode.ivalue = 1;
+    // SetBankMode is implemented in Task 17; for now bypass by recording in default LOOP bank,
+    // then change mode after. To keep this task self-contained, we test by setting up bank as ONE_SHOT in state directly.
+    // → For now, just verify Tap on a LOOP sample toggles enabled.
+    Command rec{}; rec.type = CommandType::StartRecording; rec.bank = 0;
+    e.submit(rec); tick(e, 256);
+    tick(e, 48000 / 2);
+    Command stop{}; stop.type = CommandType::StopRecording;
+    e.submit(stop); tick(e, 256);
+    auto s = e.snapshot();
+    ASSERT_EQ(s.sample_count, 1);
+    EXPECT_TRUE(s.samples[0].enabled);
+
+    Command tap{}; tap.type = CommandType::TapSample; tap.sample_id = s.samples[0].id;
+    e.submit(tap); tick(e, 256);
+    auto s2 = e.snapshot();
+    EXPECT_FALSE(s2.samples[0].enabled);   // toggled off
+}

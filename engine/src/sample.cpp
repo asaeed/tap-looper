@@ -16,6 +16,7 @@ Sample::Sample(SampleId id_, BankId bank_, Frames capacity_frames_, int channels
       enabled(false),
       playing(false),
       recording(false),
+      one_shot_play_pos(0),
       position_x(0.f),
       position_y(0.f),
       channels(channels_),
