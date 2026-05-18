@@ -15,4 +15,5 @@ object CommandType {
     const val FireAllInBank    = 11
     const val CaptureLastLoop  = 12
     const val SetBeatsPerBar   = 13
+    const val Reset            = 14
 }

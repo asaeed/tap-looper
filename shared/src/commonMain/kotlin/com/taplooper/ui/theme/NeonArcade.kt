@@ -19,8 +19,8 @@ data class TLTheme(
         Color(0xFF00B0FF), // blue
         Color(0xFFFF005C), // pink
     ),
-    val pulseScale: Float = 1.04f,
-    val pulseGlowDp: Dp = 12.dp,
+    val pulseScale: Float = 1.10f,
+    val pulseGlowDp: Dp = 28.dp,
 )
 
 val LocalTLTheme = staticCompositionLocalOf { TLTheme() }

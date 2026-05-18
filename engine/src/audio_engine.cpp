@@ -148,6 +148,15 @@ struct AudioEngine::Impl {
             state.beats_per_bar = c.ivalue;
             break;
         }
+        case CommandType::Reset: {
+            samples.clear();
+            active_recording.reset();
+            init_default_state(state);
+            global_play_head = 0;
+            next_id = 1;
+            rolling = RollingBuffer(kFallbackBufferFrames, kChannels);
+            break;
+        }
         default: break; // other commands implemented in later tasks
         }
     }

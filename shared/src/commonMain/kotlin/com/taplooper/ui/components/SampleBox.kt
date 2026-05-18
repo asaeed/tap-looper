@@ -11,16 +11,18 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.taplooper.ui.theme.LocalTLTheme
 
 enum class SampleVisualState { Idle, Playing, Recording, Muted }
 
 @Composable
 fun SampleBox(state: SampleVisualState, color: Color, bpm: Float, modifier: Modifier = Modifier) {
+    val theme = LocalTLTheme.current
     val pulseHz = if (bpm > 0) bpm / 60f else 1f
     val durationMs = ((1000f / pulseHz).coerceAtLeast(150f)).toInt()
     val transition = rememberInfiniteTransition(label = "pulse")
     val scale by transition.animateFloat(
-        initialValue = 1f, targetValue = 1.04f,
+        initialValue = 1f, targetValue = theme.pulseScale,
         animationSpec = infiniteRepeatable(tween(durationMs / 2, easing = LinearEasing), RepeatMode.Reverse),
         label = "scale"
     )
@@ -37,7 +39,7 @@ fun SampleBox(state: SampleVisualState, color: Color, bpm: Float, modifier: Modi
             .size(width = 50.dp, height = 38.dp)
             .scale(if (state == SampleVisualState.Playing || state == SampleVisualState.Recording) scale else 1f)
             .shadow(
-                elevation = if (state == SampleVisualState.Playing) 8.dp else 0.dp,
+                elevation = if (state == SampleVisualState.Playing) theme.pulseGlowDp else 0.dp,
                 shape = RoundedCornerShape(4.dp),
                 ambientColor = color, spotColor = color
             )

@@ -2,7 +2,8 @@ package com.taplooper.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -56,9 +57,10 @@ fun Bank(
                     .weight(1f)
                     .fillMaxWidth()
                     .pointerInput(recording) {
-                        detectTapGestures { offset ->
-                            if (recording) return@detectTapGestures
-                            onTapEmpty(offset.x / widthPx, offset.y / heightPx)
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = true)
+                            if (recording) return@awaitEachGesture
+                            onTapEmpty(down.position.x / widthPx, down.position.y / heightPx)
                         }
                     }
             ) {

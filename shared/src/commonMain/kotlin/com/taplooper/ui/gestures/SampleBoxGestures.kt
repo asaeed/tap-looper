@@ -6,8 +6,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
 fun Modifier.tapLongPressDrag(
@@ -24,38 +24,52 @@ fun Modifier.tapLongPressDrag(
         if (!enabled) return@pointerInput
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
+            down.consume()
             val downTime = System.currentTimeMillis()
-            var resolved = false
             var totalDelta = Offset.Zero
             var dragging = false
+            var longPressed = false
 
             while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Main)
-                val change: PointerInputChange = event.changes.firstOrNull { it.id == down.id } ?: break
+                val elapsed = System.currentTimeMillis() - downTime
+                val remaining = (longPressDelayMs - elapsed).coerceAtLeast(0L)
+
+                val event = if (!longPressed && !dragging && remaining > 0) {
+                    withTimeoutOrNull(remaining) { awaitPointerEvent(PointerEventPass.Main) }
+                } else {
+                    awaitPointerEvent(PointerEventPass.Main)
+                }
+
+                if (event == null) {
+                    // Timed out waiting — fire long-press
+                    longPressed = true
+                    onLongPress()
+                    // Drain remaining events until finger up, consuming them
+                    while (true) {
+                        val e = awaitPointerEvent(PointerEventPass.Main)
+                        val c = e.changes.firstOrNull { it.id == down.id } ?: break
+                        c.consume()
+                        if (!c.pressed) break
+                    }
+                    break
+                }
+
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                change.consume()
                 totalDelta += change.position - down.position
                 val movedFar = abs(totalDelta.x) > movementThresholdPx || abs(totalDelta.y) > movementThresholdPx
-                if (!resolved && movedFar) {
-                    resolved = true
+
+                if (!longPressed && !dragging && movedFar) {
                     dragging = true
                     onDragStart()
                 }
                 if (dragging) onDragMove(change.position)
+
                 if (!change.pressed) {
-                    val elapsed = System.currentTimeMillis() - downTime
                     when {
-                        dragging         -> onDragEnd(change.position)
-                        elapsed >= longPressDelayMs -> onLongPress()
-                        else             -> onTap()
-                    }
-                    break
-                }
-                if (!resolved && System.currentTimeMillis() - downTime >= longPressDelayMs && !movedFar) {
-                    resolved = true
-                    onLongPress()
-                    while (true) {
-                        val e2 = awaitPointerEvent(PointerEventPass.Main)
-                        val c2 = e2.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!c2.pressed) break
+                        dragging    -> onDragEnd(change.position)
+                        longPressed -> { /* already handled */ }
+                        else        -> onTap()
                     }
                     break
                 }

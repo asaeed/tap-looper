@@ -46,4 +46,5 @@ class AppViewModel {
     fun fireAllInBank(bank: Int) = bridge.submit(CT.FireAllInBank, bank = bank)
     fun captureLastLoop(bank: Int) = bridge.submit(CT.CaptureLastLoop, bank = bank)
     fun setBeatsPerBar(value: Int) = bridge.submit(CT.SetBeatsPerBar, ivalue = value)
+    fun reset() = bridge.submit(CT.Reset)
 }

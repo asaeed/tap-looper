@@ -22,6 +22,7 @@ fun TopBar(
     recordingDurationMs: Int,
     currentPage: Int,
     onCapture: () -> Unit,
+    onReset: () -> Unit,
     onPageTap: (Int) -> Unit,
 ) {
     val theme = LocalTLTheme.current
@@ -48,7 +49,17 @@ fun TopBar(
         ) {
             Text("⎘ CAPTURE", color = theme.bankColors[1], fontFamily = FontFamily.Monospace, fontSize = 11.sp)
         }
-        Row {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF2A0000))
+                    .clickable { onReset() }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text("RESET", color = Color(0xFFFF4D00), fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+            }
+            Spacer(Modifier.width(6.dp))
             repeat(2) { i ->
                 Box(
                     Modifier

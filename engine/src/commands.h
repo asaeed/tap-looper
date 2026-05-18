@@ -17,6 +17,7 @@ enum class CommandType : uint8_t {
   FireAllInBank,     // bank
   CaptureLastLoop,   // bank (focused)
   SetBeatsPerBar,    // ivalue (2/4/8)
+  Reset,             // wipes all samples, resets master_bar_frames, etc.
 };
 
 struct Command {
