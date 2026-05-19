@@ -239,6 +239,16 @@ struct AudioEngine::Impl {
                 active_recording->is_master_loop = true;
                 state.master_bar_frames = len;
                 rolling = RollingBuffer(state.master_bar_frames, kChannels);
+                // Shift play_head forward by round_trip + extra_latency so the
+                // loop's audible rhythm aligns with what the user expects. The
+                // hardware delay is unavoidable, but rather than hearing the
+                // loop's "1" round_trip ms after the click (which lags behind
+                // the user's groove), we fast-forward into the loop so sample[0]
+                // (the first attack) is heard at T_stop + L — exactly when the
+                // next downbeat is expected musically.
+                int shift = round_trip_latency_frames + extra_latency_frames;
+                if (shift < 0) shift = 0;
+                global_play_head = Frames(shift % int(state.master_bar_frames));
             }
             // For a LOOP-mode bank, mark enabled so it starts playing.
             BankMode m = state.banks[active_recording->bank].mode;
