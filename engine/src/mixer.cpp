@@ -45,7 +45,8 @@ void mix(const std::vector<Sample*>& samples,
          Frames bar_frames,
          Frames play_head,
          int frame_count,
-         float* out) {
+         float* out,
+         int extra_latency_frames) {
     if (bar_frames == 0) return; // nothing to do, output is pre-zeroed by caller
 
     bool any_solo = false;
@@ -88,6 +89,14 @@ void mix(const std::vector<Sample*>& samples,
 
         // For sub-bar samples, fire at `recorded_offset_in_bar` every bar.
         Frames offset = s.recorded_offset_in_bar;
+        // Non-master samples shift by extra_latency_frames so the user can dial
+        // in alignment with the master loop by ear. Master stays fixed.
+        if (!s.is_master_loop && extra_latency_frames != 0 && bar_frames > 0) {
+            int64_t shifted = int64_t(offset) - int64_t(extra_latency_frames);
+            int64_t L = int64_t(bar_frames);
+            int64_t mod = ((shifted % L) + L) % L;
+            offset = Frames(mod);
+        }
         Frames sample_len = s.recorded_length_frames;
 
         if (s.repeat) {

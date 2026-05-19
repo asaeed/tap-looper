@@ -44,7 +44,7 @@ struct AudioEngine::Impl {
                 // the engine ~input_latency late. Shifting the offset backward by
                 // round_trip_latency makes the playback land in sync with the loop.
                 // extra_latency_frames is a user-tunable ±offset for fine alignment.
-                Frames latency = Frames(round_trip_latency_frames + extra_latency_frames);
+                Frames latency = Frames(round_trip_latency_frames);
                 Frames L = state.master_bar_frames;
                 Frames adjusted = (global_play_head + L - (latency % L)) % L;
                 active_recording->recorded_offset_in_bar = adjusted;
@@ -236,6 +236,7 @@ struct AudioEngine::Impl {
                 break;
             }
             if (state.master_bar_frames == 0) {
+                active_recording->is_master_loop = true;
                 state.master_bar_frames = len;
                 rolling = RollingBuffer(state.master_bar_frames, kChannels);
             }
@@ -457,7 +458,7 @@ void AudioEngine::process(const float* in, float* out, int frame_count) {
         ptrs.reserve(impl_->samples.size());
         for (auto& up : impl_->samples) ptrs.push_back(up.get());
         mix(ptrs, impl_->state.banks, impl_->state.master_bar_frames,
-            impl_->global_play_head, frame_count, out);
+            impl_->global_play_head, frame_count, out, impl_->extra_latency_frames);
     }
 
     // 5. Advance global play head (AFTER mix)

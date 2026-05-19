@@ -16,7 +16,8 @@ void mix(const std::vector<Sample*>& samples,
          Frames bar_frames,
          Frames play_head,
          int frame_count,
-         float* out);
+         float* out,
+         int extra_latency_frames = 0);
 
 Frames nearest_multiple_of_L(Frames sample_len, Frames L);
 

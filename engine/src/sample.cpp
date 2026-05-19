@@ -22,7 +22,8 @@ Sample::Sample(SampleId id_, BankId bank_, Frames capacity_frames_, int channels
       start_offset_frames(0),
       repeat(false),
       channels(channels_),
-      capacity_frames(capacity_frames_) {}
+      capacity_frames(capacity_frames_),
+      is_master_loop(false) {}
 
 void Sample::append(const float* in, Frames frame_count) {
     if (!recording) return;

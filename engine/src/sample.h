@@ -29,6 +29,8 @@ struct Sample {
     int channels;
     Frames capacity_frames;
 
+    bool is_master_loop;
+
     Sample(SampleId id_, BankId bank_, Frames capacity_frames_, int channels_);
 
     // Append frames into pcm during recording. Stops at capacity.

@@ -24,7 +24,7 @@ TEST(Mixer, EnabledLoopSampleAtOffsetZero_PlaysFromStart) {
     std::vector<float> out(4 * 2, 0.f);
     Frames bar_frames = 4;
     Frames play_head = 0;
-    mix(samples, banks, bar_frames, play_head, /*frame_count=*/4, out.data());
+    mix(samples, banks, bar_frames, play_head, /*frame_count=*/4, out.data(), 0);
     EXPECT_FLOAT_EQ(out[0], 1.0f);
     EXPECT_FLOAT_EQ(out[6], 4.0f);
 }
@@ -43,7 +43,7 @@ TEST(Mixer, MutedBankSilencesSample) {
     for (int i = 1; i < kNumBanks; ++i) { banks[i] = bank; banks[i].id = i; }
 
     std::vector<float> out(8, 0.f);
-    mix(samples, banks, 4, 0, 4, out.data());
+    mix(samples, banks, 4, 0, 4, out.data(), 0);
     for (float v : out) EXPECT_FLOAT_EQ(v, 0.0f);
 }
 
@@ -61,7 +61,7 @@ TEST(Mixer, VolumeScaling) {
     for (int i = 0; i < kNumBanks; ++i) { banks[i] = bank; banks[i].id = i; }
 
     std::vector<float> out(8, 0.f);
-    mix(samples, banks, 4, 0, 4, out.data());
+    mix(samples, banks, 4, 0, 4, out.data(), 0);
     EXPECT_FLOAT_EQ(out[0], 0.25f); // 1 * 0.5 (sample) * 0.5 (bank)
 }
 
@@ -90,7 +90,7 @@ TEST(Mixer, HalfSpeedDoublesPlaybackDuration) {
 
     // bar = 8 (sample_len < bar). At Half speed sample takes 8 frames; bar is 8; full window.
     std::vector<float> out(16, 0.f);  // 8 frames stereo
-    mix(samples, banks, /*bar*/8, /*play_head*/0, /*frame_count*/8, out.data());
+    mix(samples, banks, /*bar*/8, /*play_head*/0, /*frame_count*/8, out.data(), 0);
     // frame 0: original frame 0 = 1.0
     // frame 1: original frame 0.5 = (1 + 2)/2 = 1.5
     // frame 2: original frame 1 = 2.0
