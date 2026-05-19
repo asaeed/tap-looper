@@ -44,13 +44,18 @@ fun SampleModal(
             Text(label, color = color, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
             Text("Volume ${(volume * 100).toInt()}", color = Color.LightGray, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
             Slider(value = volume, onValueChange = onVolumeChange, valueRange = 0f..1f)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Reverse  ", color = Color.LightGray, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                Switch(checked = reverse, onCheckedChange = onReverseChange)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Repeat   ", color = Color.LightGray, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                Switch(checked = repeat, onCheckedChange = onRepeatChange)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Reverse ", color = Color.LightGray, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                    Switch(checked = reverse, onCheckedChange = onReverseChange)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Repeat ", color = Color.LightGray, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                    Switch(checked = repeat, onCheckedChange = onRepeatChange)
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(0 to "½", 1 to "1", 2 to "2").forEach { (value_, label_) ->

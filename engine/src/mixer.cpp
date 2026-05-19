@@ -90,33 +90,28 @@ void mix(const std::vector<Sample*>& samples,
         Frames offset = s.recorded_offset_in_bar;
         Frames sample_len = s.recorded_length_frames;
 
-        if (sample_len <= bar_frames) {
-            if (s.repeat) {
-                // Tile the sample across the whole bar. Sample restarts every `sample_len` frames,
-                // starting from offset_in_bar within the bar.
-                for (int i = 0; i < frame_count; ++i) {
-                    Frames bar_pos = (play_head + Frames(i)) % bar_frames;
-                    // Position within the sample's tiled pattern (anchored to offset_in_bar)
-                    Frames anchored = (bar_pos + bar_frames - offset) % bar_frames;
-                    Frames local = anchored % sample_len;
-                    // Apply start offset rotation
-                    int32_t off = s.start_offset_frames;
-                    Frames effective_local;
-                    if (sample_len == 0) {
-                        effective_local = 0;
-                    } else {
-                        int64_t shifted = int64_t(local) + int64_t(off);
-                        int64_t len = int64_t(sample_len);
-                        int64_t mod = ((shifted % len) + len) % len;
-                        effective_local = Frames(mod);
-                    }
-                    float pos = float(effective_local) * speed_ratio(s.speed);
-                    for (int c = 0; c < kChannels; ++c) {
-                        out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
-                    }
+        if (s.repeat) {
+            // Tile the sample across the bar. If sample is longer than the bar,
+            // trim the overflow (only the first bar_frames worth of PCM is used).
+            Frames tile_len = (sample_len < bar_frames) ? sample_len : bar_frames;
+            if (tile_len == 0) continue;
+            for (int i = 0; i < frame_count; ++i) {
+                Frames bar_pos = (play_head + Frames(i)) % bar_frames;
+                Frames anchored = (bar_pos + bar_frames - offset) % bar_frames;
+                Frames local = anchored % tile_len;
+                // Apply start_offset rotation
+                int32_t off = s.start_offset_frames;
+                int64_t shifted = int64_t(local) + int64_t(off);
+                int64_t len = int64_t(tile_len);
+                int64_t mod = ((shifted % len) + len) % len;
+                Frames effective_local = Frames(mod);
+                float pos = float(effective_local) * speed_ratio(s.speed);
+                for (int c = 0; c < kChannels; ++c) {
+                    out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
                 }
-            } else {
-            // Sub-bar: existing window logic (unchanged from Task 12)
+            }
+        } else if (sample_len <= bar_frames) {
+            // Sub-bar: existing window logic (unchanged)
             for (int i = 0; i < frame_count; ++i) {
                 Frames bar_pos = (play_head + Frames(i)) % bar_frames;
                 bool inside = false;
@@ -149,9 +144,8 @@ void mix(const std::vector<Sample*>& samples,
                     out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
                 }
             }
-            } // end repeat else
         } else {
-            // Multi-bar: loop_length = nearest_multiple_of_L
+            // Multi-bar: loop_length = nearest_multiple_of_L (unchanged)
             Frames loop_len = nearest_multiple_of_L(sample_len, bar_frames);
             // The sample's iteration starts at bar 0 of the master grid (offset 0 by spec).
             // We need a position within the loop iteration: loop_pos in [0, loop_len).

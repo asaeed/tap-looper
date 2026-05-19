@@ -6,10 +6,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,18 +15,27 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.taplooper.ui.theme.LocalTLTheme
 
+private const val kSampleRate = 48000
+
 @Composable
-fun BottomBar(bpm: Float, beatsPerBar: Int, masterBarFrames: Int, onChangeBeats: (Int) -> Unit, onChangeMasterBarFrames: (Int) -> Unit) {
+fun BottomBar(
+    bpm: Float,
+    beatsPerBar: Int,
+    masterBarFrames: Int,
+    onChangeBeats: (Int) -> Unit,
+    onChangeMasterBarFrames: (Int) -> Unit,
+) {
     val theme = LocalTLTheme.current
-    var tuneVisible by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
         Text("BPM ${"%.1f".format(bpm)}", color = theme.text, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-        Spacer(Modifier.width(16.dp))
-        listOf(2 to "÷2", 8 to "×2").forEach { (next, label) ->
+        Spacer(Modifier.width(8.dp))
+
+        // ÷2 / ×2 (existing — coarse beats_per_bar swap)
+        listOf(2 to "÷2", 8 to "×2").forEach { (_, label) ->
             Box(
                 Modifier
                     .clip(RoundedCornerShape(4.dp))
@@ -42,40 +47,27 @@ fun BottomBar(bpm: Float, beatsPerBar: Int, masterBarFrames: Int, onChangeBeats:
                         }
                         onChangeBeats(v)
                     }
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
-            ) { Text(label, color = theme.bankColors[0], fontFamily = FontFamily.Monospace, fontSize = 11.sp) }
-            Spacer(Modifier.width(8.dp))
-        }
-        if (masterBarFrames > 0) {
-            Spacer(Modifier.width(16.dp))
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .clickable { tuneVisible = !tuneVisible }
                     .padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = if (tuneVisible) "TUNE ▼" else "TUNE",
-                    color = if (tuneVisible) theme.bankColors[2] else theme.text.copy(alpha = 0.5f),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
-                )
-            }
-            if (tuneVisible) {
-                Spacer(Modifier.width(8.dp))
-                val lengthMs = masterBarFrames * 1000 / 48000
-                Text("L ${lengthMs}ms", color = theme.text, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                Spacer(Modifier.width(6.dp))
-                listOf(-240 to "−5ms", 240 to "+5ms").forEach { (delta, label) ->
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF111111))
-                            .clickable { onChangeMasterBarFrames(masterBarFrames + delta) }
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) { Text(label, color = theme.bankColors[2], fontFamily = FontFamily.Monospace, fontSize = 10.sp) }
-                    Spacer(Modifier.width(4.dp))
-                }
+            ) { Text(label, color = theme.bankColors[0], fontFamily = FontFamily.Monospace, fontSize = 10.sp) }
+            Spacer(Modifier.width(4.dp))
+        }
+
+        // ±0.1 BPM fine-tune — always visible. Only enabled once a master bar exists.
+        if (masterBarFrames > 0) {
+            Spacer(Modifier.width(12.dp))
+            listOf(-0.1f to "−0.1", 0.1f to "+0.1").forEach { (delta, label) ->
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(0xFF111111))
+                        .clickable {
+                            val newBpm = (bpm + delta).coerceAtLeast(20f)
+                            val newL = (beatsPerBar * 60f * kSampleRate / newBpm).toInt()
+                            onChangeMasterBarFrames(newL)
+                        }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) { Text(label, color = theme.bankColors[2], fontFamily = FontFamily.Monospace, fontSize = 10.sp) }
+                Spacer(Modifier.width(4.dp))
             }
         }
     }
