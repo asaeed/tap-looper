@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -30,6 +31,7 @@ fun SampleModal(
     onDismiss: () -> Unit,
 ) {
     Dialog(onDismissRequest = onDismiss) {
+        var advancedVisible by remember { mutableStateOf(false) }
         Column(
             Modifier
                 .background(Color(0xFF0A0A0A), RoundedCornerShape(12.dp))
@@ -54,13 +56,28 @@ fun SampleModal(
                     ) { Text(label_, color = if (speed == value_) Color.Black else Color.White) }
                 }
             }
-            val startOffsetMs = startOffsetFrames * 1000 / 48000
-            Text("Start shift  ${startOffsetMs}ms", color = Color.LightGray, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-            Slider(
-                value = startOffsetFrames.toFloat(),
-                onValueChange = { onStartOffsetChange(it.toInt()) },
-                valueRange = -24000f..24000f,    // ±500ms at 48 kHz
-            )
+            Spacer(Modifier.height(4.dp))
+            Box(
+                Modifier
+                    .clickable { advancedVisible = !advancedVisible }
+                    .padding(vertical = 2.dp)
+            ) {
+                Text(
+                    text = if (advancedVisible) "ADVANCED ▼" else "ADVANCED ▶",
+                    color = Color.LightGray.copy(alpha = 0.6f),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                )
+            }
+            if (advancedVisible) {
+                val startOffsetMs = startOffsetFrames * 1000 / 48000
+                Text("Start shift  ${startOffsetMs}ms", color = Color.LightGray, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                Slider(
+                    value = startOffsetFrames.toFloat(),
+                    onValueChange = { onStartOffsetChange(it.toInt()) },
+                    valueRange = -24000f..24000f,    // ±500ms at 48 kHz
+                )
+            }
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = { onDelete(); onDismiss() },
