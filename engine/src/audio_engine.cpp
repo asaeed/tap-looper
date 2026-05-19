@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
 
 namespace tl {
 
@@ -75,6 +76,7 @@ struct AudioEngine::Impl {
                 std::memmove(rec.pcm.data(),
                              rec.pcm.data() + first_audible * rec.channels,
                              new_len * rec.channels * sizeof(float));
+                Frames pre_trim_len = rec.recorded_length_frames;
                 rec.recorded_length_frames = new_len;
                 // Also shift the recorded_offset_in_bar forward by the trimmed amount.
                 // (The recording effectively started later than the user clicked.)
@@ -82,6 +84,55 @@ struct AudioEngine::Impl {
                     rec.recorded_offset_in_bar =
                         (rec.recorded_offset_in_bar + first_audible) % state.master_bar_frames;
                 }
+                std::fprintf(stderr,
+                    "[engine] leading trim: first_audible=%u, was_len=%u, new_len=%u\n",
+                    (unsigned)first_audible,
+                    (unsigned)pre_trim_len,
+                    (unsigned)rec.recorded_length_frames);
+            }
+            // ────────────────────────────────────────────────────────────────
+
+            // ── Trim trailing onset ─────────────────────────────────────────
+            // Scan the recording forward for onsets (rising edges above threshold
+            // after sufficient silence). The "last onset" is the final attack the
+            // user played (typically the kick they used to signal stop). Trim the
+            // recording to end at that onset, so when looped, the wrap from end to
+            // start IS the rhythmic downbeat — no doubled-up "1" kick at the boundary.
+            constexpr float kOnsetThreshold = 0.05f;          // ~-26 dB
+            constexpr Frames kMinSilenceBetweenOnsets = 480;  // 10 ms at 48 kHz
+
+            Frames last_onset_pos = 0;
+            int    onset_count    = 0;
+            Frames silence_run    = kMinSilenceBetweenOnsets;  // first audible counts as an onset
+
+            for (Frames f = 0; f < rec.recorded_length_frames; ++f) {
+                float amp = 0.f;
+                for (int ch = 0; ch < rec.channels; ++ch) {
+                    float v = std::abs(rec.pcm[f * rec.channels + ch]);
+                    if (v > amp) amp = v;
+                }
+                if (amp > kOnsetThreshold) {
+                    if (silence_run >= kMinSilenceBetweenOnsets) {
+                        last_onset_pos = f;
+                        ++onset_count;
+                    }
+                    silence_run = 0;
+                } else {
+                    ++silence_run;
+                }
+            }
+
+            // Only trim if we found a rhythmic pattern (>= 2 onsets) and the last
+            // onset is in the latter half of the recording (avoids cutting off most
+            // of a long sustained recording).
+            if (onset_count >= 2 && last_onset_pos > rec.recorded_length_frames / 2) {
+                std::fprintf(stderr,
+                    "[engine] trailing trim: onsets=%d, last_onset=%u, was_len=%u, new_len=%u\n",
+                    onset_count,
+                    (unsigned)last_onset_pos,
+                    (unsigned)rec.recorded_length_frames,
+                    (unsigned)last_onset_pos);
+                rec.recorded_length_frames = last_onset_pos;
             }
             // ────────────────────────────────────────────────────────────────
 
