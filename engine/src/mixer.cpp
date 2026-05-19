@@ -100,9 +100,15 @@ void mix(const std::vector<Sample*>& samples,
         Frames sample_len = s.recorded_length_frames;
 
         if (s.repeat) {
-            // Tile the sample across the bar. If sample is longer than the bar,
-            // trim the overflow (only the first bar_frames worth of PCM is used).
-            Frames tile_len = (sample_len < bar_frames) ? sample_len : bar_frames;
+            // Tile the sample across the bar. Tile size is measured in OUTPUT frames
+            // (accounting for playback speed) — at 2x speed the sample finishes in
+            // sample_len/2 output frames, so it should tile twice per bar. At 1/2 speed
+            // it takes 2*sample_len output frames; if that overflows the bar, trim.
+            float speed = speed_ratio(s.speed);
+            Frames effective_play_len = (speed > 0.f)
+                ? Frames(float(sample_len) / speed)
+                : sample_len;
+            Frames tile_len = (effective_play_len < bar_frames) ? effective_play_len : bar_frames;
             if (tile_len == 0) continue;
             for (int i = 0; i < frame_count; ++i) {
                 Frames bar_pos = (play_head + Frames(i)) % bar_frames;
@@ -114,7 +120,7 @@ void mix(const std::vector<Sample*>& samples,
                 int64_t len = int64_t(tile_len);
                 int64_t mod = ((shifted % len) + len) % len;
                 Frames effective_local = Frames(mod);
-                float pos = float(effective_local) * speed_ratio(s.speed);
+                float pos = float(effective_local) * speed;
                 for (int c = 0; c < kChannels; ++c) {
                     out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
                 }
