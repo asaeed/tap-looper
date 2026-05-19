@@ -24,7 +24,7 @@ struct AudioEngine::Impl {
     int sample_rate{kSampleRate};
     Frames global_play_head{0};   // wraps modulo master_bar_frames once set
     int round_trip_latency_frames{0};
-    int extra_latency_frames{0};
+    int extra_latency_frames{2400};  // 50ms default at 48kHz — typical built-in Mac audio
 
     Impl() { init_default_state(state); publisher.publish(state); }
 
