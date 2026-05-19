@@ -16,17 +16,17 @@ class EngineBridge {
     ): Boolean = nativeSubmit(handle, type, sampleId, bank, fx, fy, fvalue, ivalue, bvalue)
 
     fun snapshot(): EngineStateKt {
-        val longs = LongArray(8 + 8 * 2 + 64 * 8)
+        val longs = LongArray(9 + 8 * 2 + 64 * 8)
         val floats = FloatArray(1 + 8 + 64 * 4)
         nativeSnapshot(handle, longs, floats)
         val banks = (0 until 8).map { i ->
-            val lp = 8 + i * 2
+            val lp = 9 + i * 2
             val fp = 1 + i
             BankStateKt(id = i, mode = longs[lp].toInt(), muted = longs[lp+1] == 1L, volume = floats[fp])
         }
         val count = longs[1].toInt()
         val samples = (0 until count).map { i ->
-            val lp = 8 + 8*2 + i * 8
+            val lp = 9 + 8*2 + i * 8
             val fp = 1 + 8 + i * 4
             SampleStateKt(
                 id = longs[lp],
@@ -52,6 +52,7 @@ class EngineBridge {
             focusedBank = longs[2].toInt(),
             masterBarFrames = longs[3].toInt(),
             beatsPerBar = longs[7].toInt(),
+            masterPlaying = longs[8] == 1L,
             bpm = floats[0],
             version = longs[0],
         )

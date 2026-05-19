@@ -63,11 +63,11 @@ fun Modifier.tapLongPressDrag(
                     dragging = true
                     onDragStart()
                 }
-                if (dragging) onDragMove(change.position)
+                if (dragging) onDragMove(totalDelta)
 
                 if (!change.pressed) {
                     when {
-                        dragging    -> onDragEnd(change.position)
+                        dragging    -> onDragEnd(totalDelta)
                         longPressed -> { /* already handled */ }
                         else        -> onTap()
                     }

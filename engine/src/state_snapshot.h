@@ -39,6 +39,7 @@ struct EngineState {
     Frames master_bar_frames;
     int beats_per_bar;
     float bpm;
+    bool master_playing;
     uint64_t version;
 };
 

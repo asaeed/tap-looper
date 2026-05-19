@@ -157,6 +157,9 @@ struct AudioEngine::Impl {
             rolling = RollingBuffer(kFallbackBufferFrames, kChannels);
             break;
         }
+        case CommandType::SetMasterPlaying:
+            state.master_playing = c.bvalue;
+            break;
         default: break; // other commands implemented in later tasks
         }
     }
@@ -222,7 +225,7 @@ void AudioEngine::process(const float* in, float* out, int frame_count) {
 
     // 4. Zero output then mix (using current play_head)
     std::memset(out, 0, sizeof(float) * size_t(frame_count) * kChannels);
-    {
+    if (impl_->state.master_playing) {
         std::vector<Sample*> ptrs;
         ptrs.reserve(impl_->samples.size());
         for (auto& up : impl_->samples) ptrs.push_back(up.get());

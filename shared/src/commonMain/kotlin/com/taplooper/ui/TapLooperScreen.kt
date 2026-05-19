@@ -64,8 +64,10 @@ fun TapLooperScreen(vm: AppViewModel) {
                         recording = state.recording,
                         recordingDurationMs = state.recordingDurationFrames * 1000 / 48000,
                         currentPage = page,
+                        masterPlaying = state.masterPlaying,
                         onCapture = { vm.captureLastLoop(state.focusedBank) },
                         onReset = { vm.reset() },
+                        onTogglePlay = { vm.setMasterPlaying(!state.masterPlaying) },
                         onPageTap = { p -> if (!state.recording) page = p },
                     )
                     Box(Modifier.weight(1f).fillMaxWidth()) {

@@ -47,4 +47,6 @@ class AppViewModel {
     fun captureLastLoop(bank: Int) = bridge.submit(CT.CaptureLastLoop, bank = bank)
     fun setBeatsPerBar(value: Int) = bridge.submit(CT.SetBeatsPerBar, ivalue = value)
     fun reset() = bridge.submit(CT.Reset)
+    fun setMasterPlaying(playing: Boolean) =
+        bridge.submit(CT.SetMasterPlaying, bvalue = playing)
 }

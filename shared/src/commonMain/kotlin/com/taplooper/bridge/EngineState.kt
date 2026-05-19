@@ -31,6 +31,7 @@ data class EngineStateKt(
     val focusedBank: Int,
     val masterBarFrames: Int,
     val beatsPerBar: Int,
+    val masterPlaying: Boolean,
     val bpm: Float,
     val version: Long,
 )

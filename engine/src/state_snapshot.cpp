@@ -6,6 +6,7 @@ namespace tl {
 void init_default_state(EngineState& s) {
     std::memset(&s, 0, sizeof(s));
     s.beats_per_bar = 4;
+    s.master_playing = true;
     for (int i = 0; i < kNumBanks; ++i) {
         s.banks[i].id = BankId(i);
         s.banks[i].mode = BankMode::Loop;

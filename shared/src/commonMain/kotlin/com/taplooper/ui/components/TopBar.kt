@@ -21,8 +21,10 @@ fun TopBar(
     recording: Boolean,
     recordingDurationMs: Int,
     currentPage: Int,
+    masterPlaying: Boolean,
     onCapture: () -> Unit,
     onReset: () -> Unit,
+    onTogglePlay: () -> Unit,
     onPageTap: (Int) -> Unit,
 ) {
     val theme = LocalTLTheme.current
@@ -32,14 +34,33 @@ fun TopBar(
             .height(32.dp)
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // REC indicator (fixed width so it doesn't shift layout)
         Text(
             text = if (recording) "● ${"%.1f".format(recordingDurationMs / 1000f)}s" else "",
             color = theme.recording,
             fontFamily = FontFamily.Monospace,
             fontSize = 11.sp,
+            modifier = Modifier.widthIn(min = 56.dp),
         )
+        // PLAY / STOP toggle
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .background(if (masterPlaying) Color(0xFF003322) else Color(0xFF220000))
+                .clickable { onTogglePlay() }
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Text(
+                if (masterPlaying) "■ STOP" else "▶ PLAY",
+                color = if (masterPlaying) Color(0xFF00FF66) else Color(0xFF00FFD5),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        // CAPTURE button
         Box(
             Modifier
                 .clip(RoundedCornerShape(4.dp))
@@ -49,6 +70,7 @@ fun TopBar(
         ) {
             Text("⎘ CAPTURE", color = theme.bankColors[1], fontFamily = FontFamily.Monospace, fontSize = 11.sp)
         }
+        // RESET + page pips
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier

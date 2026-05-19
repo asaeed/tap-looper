@@ -6,11 +6,13 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -37,14 +39,18 @@ fun Bank(
     pulsePhase: Float,
     isFocused: Boolean,
 ) {
+    var bankScreenOrigin by remember { mutableStateOf(Offset.Zero) }
+
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .border(if (isFocused) 1.dp else 0.dp, color.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
             .background(Color(0xFF0A0A0A), RoundedCornerShape(8.dp))
+            .onGloballyPositioned { coords -> bankScreenOrigin = coords.positionInRoot() }
     ) {
         val widthPx = constraints.maxWidth.toFloat()
         val heightPx = constraints.maxHeight.toFloat()
+        val density = LocalDensity.current
         Column(Modifier.fillMaxSize()) {
             BankHeader(
                 label = "BANK ${bankState.id + 1}",
@@ -62,7 +68,16 @@ fun Bank(
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = true)
                             if (recording) return@awaitEachGesture
-                            onTapEmpty(down.position.x / widthPx, down.position.y / heightPx)
+                            // Clamp so box never straddles bank edge (Issue C)
+                            val halfWPx = with(density) { 25.dp.toPx() }
+                            val halfHPx = with(density) { 19.dp.toPx() }
+                            val minX = halfWPx / widthPx
+                            val maxX = 1f - halfWPx / widthPx
+                            val minY = halfHPx / heightPx
+                            val maxY = 1f - halfHPx / heightPx
+                            val xNorm = (down.position.x / widthPx).coerceIn(minX, maxX)
+                            val yNorm = (down.position.y / heightPx).coerceIn(minY, maxY)
+                            onTapEmpty(xNorm, yNorm)
                         }
                     }
             ) {
@@ -74,13 +89,14 @@ fun Bank(
                         pulsePhase = pulsePhase,
                         widthPx = widthPx,
                         heightPx = heightPx,
+                        bankScreenOrigin = bankScreenOrigin,
                         muted = bankState.muted,
                         oneShot = bankState.mode == 1,
                         onTap = { onSampleTap(s) },
                         onLongPress = { onSampleLongPress(s) },
                         onDragStart = { onSampleDragStart(s) },
                         onDragMove = { off -> onSampleDragMove(s, off) },
-                        onDragEnd = { off -> onSampleDragEnd(s, off) },
+                        onDragEnd = { screenPos -> onSampleDragEnd(s, screenPos) },
                         enabled = !recording,
                     )
                 }
@@ -96,6 +112,7 @@ private fun SampleAt(
     color: Color, bpm: Float,
     pulsePhase: Float,
     widthPx: Float, heightPx: Float,
+    bankScreenOrigin: Offset,
     muted: Boolean, oneShot: Boolean,
     onTap: () -> Unit, onLongPress: () -> Unit,
     onDragStart: () -> Unit,
@@ -103,7 +120,7 @@ private fun SampleAt(
     onDragEnd: (Offset) -> Unit,
     enabled: Boolean,
 ) {
-    val state = when {
+    val visualState = when {
         s.recording -> SampleVisualState.Recording
         muted       -> SampleVisualState.Muted
         oneShot && !s.playing -> SampleVisualState.Idle
@@ -115,15 +132,30 @@ private fun SampleAt(
     val halfHeightPx = with(density) { 19.dp.toPx() }
     val xPx = (s.positionX * widthPx - halfWidthPx).toInt()
     val yPx = (s.positionY * heightPx - halfHeightPx).toInt()
+
+    var dragDelta by remember { mutableStateOf(Offset.Zero) }
+
     Box(
         Modifier
-            .offset { IntOffset(xPx, yPx) }
+            .offset { IntOffset(xPx + dragDelta.x.toInt(), yPx + dragDelta.y.toInt()) }
             .tapLongPressDrag(
-                onTap = onTap, onLongPress = onLongPress,
-                onDragStart = onDragStart, onDragMove = onDragMove, onDragEnd = onDragEnd,
+                onTap = onTap,
+                onLongPress = onLongPress,
+                onDragStart = { dragDelta = Offset.Zero; onDragStart() },
+                onDragMove = { delta ->
+                    dragDelta = delta
+                    onDragMove(delta)
+                },
+                onDragEnd = { delta ->
+                    // Compute absolute screen centre of the box at its dropped position
+                    val screenPos = bankScreenOrigin +
+                        Offset(xPx + halfWidthPx, yPx + halfHeightPx) + delta
+                    dragDelta = Offset.Zero
+                    onDragEnd(screenPos)
+                },
                 enabled = enabled,
             )
     ) {
-        SampleBox(state = state, color = color, bpm = bpm, pulsePhase = pulsePhase)
+        SampleBox(state = visualState, color = color, bpm = bpm, pulsePhase = pulsePhase)
     }
 }
