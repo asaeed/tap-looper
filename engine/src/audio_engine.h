@@ -24,6 +24,12 @@ public:
   // Test/setup: get sample rate (default 48000)
   int sample_rate() const;
 
+  // Audio I/O calls this once after device init to inform the engine of
+  // the platform's round-trip latency (input buffer + output buffer in frames).
+  // Used to compensate the recorded_offset_in_bar of subsequent recordings
+  // so they play back in sync with what the user heard during recording.
+  void set_round_trip_latency_frames(int frames);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace tl {
@@ -21,6 +22,7 @@ struct AudioEngine::Impl {
     SampleId next_id{1};
     int sample_rate{kSampleRate};
     Frames global_play_head{0};   // wraps modulo master_bar_frames once set
+    int round_trip_latency_frames{0};
 
     Impl() { init_default_state(state); publisher.publish(state); }
 
@@ -33,10 +35,16 @@ struct AudioEngine::Impl {
             active_recording->position_x = c.fx;
             active_recording->position_y = c.fy;
             active_recording->recording = true;
-            // recorded_offset_in_bar captured at recording start
+            // recorded_offset_in_bar captured at recording start, with latency compensation
             if (state.master_bar_frames > 0) {
-                // current play position mod L
-                active_recording->recorded_offset_in_bar = global_play_head;
+                // Compensate for round-trip latency: the audio the user hears now
+                // was emitted ~output_latency ago, and their played notes arrive at
+                // the engine ~input_latency late. Shifting the offset backward by
+                // round_trip_latency makes the playback land in sync with the loop.
+                Frames latency = Frames(round_trip_latency_frames);
+                Frames L = state.master_bar_frames;
+                Frames adjusted = (global_play_head + L - (latency % L)) % L;
+                active_recording->recorded_offset_in_bar = adjusted;
             }
             state.recording = true;
             state.recording_sample_id = active_recording->id;
@@ -45,6 +53,38 @@ struct AudioEngine::Impl {
         case CommandType::StopRecording: {
             if (!active_recording) return;
             active_recording->recording = false;
+
+            // ── Trim leading silence ────────────────────────────────────────
+            // Find the first frame with amplitude above threshold across any channel.
+            constexpr float kSilenceThreshold = 0.02f;  // ~-34 dB
+            Sample& rec = *active_recording;
+            Frames first_audible = 0;
+            bool found_audible = false;
+            for (Frames f = 0; f < rec.recorded_length_frames; ++f) {
+                bool audible = false;
+                for (int ch = 0; ch < rec.channels; ++ch) {
+                    if (std::abs(rec.pcm[f * rec.channels + ch]) > kSilenceThreshold) {
+                        audible = true; break;
+                    }
+                }
+                if (audible) { first_audible = f; found_audible = true; break; }
+            }
+            if (found_audible && first_audible > 0 && first_audible < rec.recorded_length_frames) {
+                // Shift PCM backward by first_audible frames.
+                Frames new_len = rec.recorded_length_frames - first_audible;
+                std::memmove(rec.pcm.data(),
+                             rec.pcm.data() + first_audible * rec.channels,
+                             new_len * rec.channels * sizeof(float));
+                rec.recorded_length_frames = new_len;
+                // Also shift the recorded_offset_in_bar forward by the trimmed amount.
+                // (The recording effectively started later than the user clicked.)
+                if (state.master_bar_frames > 0) {
+                    rec.recorded_offset_in_bar =
+                        (rec.recorded_offset_in_bar + first_audible) % state.master_bar_frames;
+                }
+            }
+            // ────────────────────────────────────────────────────────────────
+
             Frames len = active_recording->recorded_length_frames;
             Frames min_frames = Frames(sample_rate * kMinRecordingMs / 1000);
             if (len < min_frames) {
@@ -253,5 +293,9 @@ EngineState AudioEngine::snapshot() const {
 }
 
 int AudioEngine::sample_rate() const { return impl_->sample_rate; }
+
+void AudioEngine::set_round_trip_latency_frames(int frames) {
+    impl_->round_trip_latency_frames = frames;
+}
 
 } // namespace tl

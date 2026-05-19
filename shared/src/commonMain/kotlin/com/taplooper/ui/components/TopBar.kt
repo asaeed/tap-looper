@@ -44,6 +44,17 @@ fun TopBar(
             fontSize = 11.sp,
             modifier = Modifier.widthIn(min = 56.dp),
         )
+        // CAPTURE button
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color(0xFF2A0020))
+                .clickable { onCapture() }
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Text("⎘ CAPTURE", color = theme.bankColors[1], fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+        }
+        Spacer(Modifier.weight(1f))
         // PLAY / STOP toggle
         Box(
             Modifier
@@ -58,17 +69,6 @@ fun TopBar(
                 fontFamily = FontFamily.Monospace,
                 fontSize = 11.sp,
             )
-        }
-        Spacer(Modifier.weight(1f))
-        // CAPTURE button
-        Box(
-            Modifier
-                .clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFF2A0020))
-                .clickable { onCapture() }
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-        ) {
-            Text("⎘ CAPTURE", color = theme.bankColors[1], fontFamily = FontFamily.Monospace, fontSize = 11.sp)
         }
         // RESET + page pips
         Row(verticalAlignment = Alignment.CenterVertically) {

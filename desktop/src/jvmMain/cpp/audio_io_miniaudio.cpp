@@ -41,6 +41,15 @@ public:
             return false;
         }
         started_ = true;
+
+        // Compute round-trip latency in frames and report it to the engine
+        int input_frames  = int(device_.capture.internalPeriodSizeInFrames  * device_.capture.internalPeriods);
+        int output_frames = int(device_.playback.internalPeriodSizeInFrames * device_.playback.internalPeriods);
+        int round_trip = input_frames + output_frames;
+        std::fprintf(stderr, "[miniaudio] round_trip_latency_frames=%d (input=%d, output=%d)\n",
+                     round_trip, input_frames, output_frames);
+        engine.set_round_trip_latency_frames(round_trip);
+
         return true;
     }
 
