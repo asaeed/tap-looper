@@ -26,6 +26,7 @@ struct BankState {
     BankMode mode;
     float volume;
     bool muted;
+    bool soloed;
 };
 
 struct EngineState {

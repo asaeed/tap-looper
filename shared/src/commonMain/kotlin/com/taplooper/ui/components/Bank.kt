@@ -30,6 +30,7 @@ fun Bank(
     onTapEmpty: (Float, Float) -> Unit,
     onAction: () -> Unit,
     onToggleMode: () -> Unit,
+    onToggleSolo: () -> Unit,
     onSampleTap: (SampleStateKt) -> Unit,
     onSampleLongPress: (SampleStateKt) -> Unit,
     onSampleDragStart: (SampleStateKt) -> Unit,
@@ -57,8 +58,10 @@ fun Bank(
                 color = color,
                 oneShot = bankState.mode == 1,
                 muted = bankState.muted,
+                soloed = bankState.soloed,
                 onToggleMode = onToggleMode,
                 onAction = onAction,
+                onToggleSolo = onToggleSolo,
             )
             Box(
                 Modifier

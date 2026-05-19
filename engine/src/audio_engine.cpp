@@ -93,6 +93,7 @@ struct AudioEngine::Impl {
             }
             break;
         }
+        case CommandType::SetBankSolo:    state.banks[c.bank].soloed = c.bvalue; break;
         case CommandType::SetBankMute:    state.banks[c.bank].muted = c.bvalue; break;
         case CommandType::SetBankVolume:  state.banks[c.bank].volume = c.fvalue; break;
         case CommandType::SetBankMode:    state.banks[c.bank].mode = c.ivalue == 1 ? BankMode::OneShot : BankMode::Loop; break;

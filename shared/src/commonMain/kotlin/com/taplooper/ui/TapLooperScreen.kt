@@ -92,6 +92,7 @@ fun TapLooperScreen(vm: AppViewModel) {
                                     val cur = state.banks[bankId].mode == 1
                                     vm.setBankMode(bankId, !cur)
                                 },
+                                onToggleSolo = { vm.setBankSolo(bankId, !state.banks[bankId].soloed) },
                                 onSampleTap = { s -> vm.tapSample(s.id) },
                                 onSampleLongPress = { s -> modalSample = s },
                                 onSampleDragStart = { _ -> },

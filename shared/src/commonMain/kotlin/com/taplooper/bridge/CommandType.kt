@@ -17,4 +17,5 @@ object CommandType {
     const val SetBeatsPerBar   = 13
     const val Reset            = 14
     const val SetMasterPlaying = 15
+    const val SetBankSolo      = 16
 }

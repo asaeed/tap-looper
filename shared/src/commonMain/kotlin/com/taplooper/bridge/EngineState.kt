@@ -20,6 +20,7 @@ data class BankStateKt(
     val mode: Int,         // 0=Loop, 1=OneShot
     val volume: Float,
     val muted: Boolean,
+    val soloed: Boolean,
 )
 
 data class EngineStateKt(

@@ -12,6 +12,7 @@ void init_default_state(EngineState& s) {
         s.banks[i].mode = BankMode::Loop;
         s.banks[i].volume = 1.0f;
         s.banks[i].muted = false;
+        s.banks[i].soloed = false;
     }
 }
 

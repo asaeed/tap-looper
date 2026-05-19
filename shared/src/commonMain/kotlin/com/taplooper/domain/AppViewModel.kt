@@ -49,4 +49,6 @@ class AppViewModel {
     fun reset() = bridge.submit(CT.Reset)
     fun setMasterPlaying(playing: Boolean) =
         bridge.submit(CT.SetMasterPlaying, bvalue = playing)
+    fun setBankSolo(bank: Int, soloed: Boolean) =
+        bridge.submit(CT.SetBankSolo, bank = bank, bvalue = soloed)
 }

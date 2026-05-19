@@ -48,11 +48,20 @@ void mix(const std::vector<Sample*>& samples,
          float* out) {
     if (bar_frames == 0) return; // nothing to do, output is pre-zeroed by caller
 
+    bool any_solo = false;
+    for (int i = 0; i < kNumBanks; ++i) {
+        if (banks[i].soloed) { any_solo = true; break; }
+    }
+
     for (Sample* sp : samples) {
         if (!sp) continue;
         const Sample& s = *sp;
         const BankState& b = banks[s.bank];
-        if (b.muted) continue;
+        if (any_solo) {
+            if (!b.soloed) continue;  // when any bank is soloed, only soloed banks play
+        } else {
+            if (b.muted) continue;    // normal mute behavior
+        }
         if (s.recorded_length_frames == 0) continue;
         float gain = s.volume * b.volume;
         bool is_loop = (b.mode == BankMode::Loop);

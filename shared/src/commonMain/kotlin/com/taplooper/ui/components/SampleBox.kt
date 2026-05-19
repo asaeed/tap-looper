@@ -45,10 +45,10 @@ fun SampleBox(
     val scaleTarget = 1f + (theme.pulseScale - 1f) * pulseAmount
 
     val (bg, border, alpha) = when (state) {
-        SampleVisualState.Idle      -> Triple(color.copy(alpha = 0.15f), color, 1f)
+        SampleVisualState.Idle      -> Triple(color.copy(alpha = 0.08f), color.copy(alpha = 0.5f), 1f)
         SampleVisualState.Playing   -> Triple(color, color, 1f)
         SampleVisualState.Recording -> Triple(Color.Transparent, Color(0xFFFF4D00), 1f)
-        SampleVisualState.Muted     -> Triple(Color.Transparent, color, 0.4f)
+        SampleVisualState.Muted     -> Triple(Color.Transparent, color.copy(alpha = 0.3f), 0.4f)
     }
 
     val elevation = when (state) {
