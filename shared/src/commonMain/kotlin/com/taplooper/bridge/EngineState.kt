@@ -14,6 +14,7 @@ data class SampleStateKt(
     val recordedLengthFrames: Int,
     val recordedOffsetInBar: Int,
     val startOffsetFrames: Int,
+    val repeat: Boolean,
 )
 
 data class BankStateKt(

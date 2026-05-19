@@ -24,6 +24,7 @@ struct Sample {
     float position_x, position_y;
 
     int32_t start_offset_frames;   // can be negative; rotates PCM at playback (LOOP) or shifts start position (ONE-SHOT)
+    bool repeat;                   // sub-bar LOOP: tile across the whole bar instead of playing once
 
     int channels;
     Frames capacity_frames;

@@ -20,4 +20,5 @@ object CommandType {
     const val SetBankSolo      = 16
     const val SetSampleStartOffset = 17
     const val SetMasterBarFrames   = 18
+    const val SetSampleRepeat      = 19
 }

@@ -91,6 +91,31 @@ void mix(const std::vector<Sample*>& samples,
         Frames sample_len = s.recorded_length_frames;
 
         if (sample_len <= bar_frames) {
+            if (s.repeat) {
+                // Tile the sample across the whole bar. Sample restarts every `sample_len` frames,
+                // starting from offset_in_bar within the bar.
+                for (int i = 0; i < frame_count; ++i) {
+                    Frames bar_pos = (play_head + Frames(i)) % bar_frames;
+                    // Position within the sample's tiled pattern (anchored to offset_in_bar)
+                    Frames anchored = (bar_pos + bar_frames - offset) % bar_frames;
+                    Frames local = anchored % sample_len;
+                    // Apply start offset rotation
+                    int32_t off = s.start_offset_frames;
+                    Frames effective_local;
+                    if (sample_len == 0) {
+                        effective_local = 0;
+                    } else {
+                        int64_t shifted = int64_t(local) + int64_t(off);
+                        int64_t len = int64_t(sample_len);
+                        int64_t mod = ((shifted % len) + len) % len;
+                        effective_local = Frames(mod);
+                    }
+                    float pos = float(effective_local) * speed_ratio(s.speed);
+                    for (int c = 0; c < kChannels; ++c) {
+                        out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
+                    }
+                }
+            } else {
             // Sub-bar: existing window logic (unchanged from Task 12)
             for (int i = 0; i < frame_count; ++i) {
                 Frames bar_pos = (play_head + Frames(i)) % bar_frames;
@@ -124,6 +149,7 @@ void mix(const std::vector<Sample*>& samples,
                     out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
                 }
             }
+            } // end repeat else
         } else {
             // Multi-bar: loop_length = nearest_multiple_of_L
             Frames loop_len = nearest_multiple_of_L(sample_len, bar_frames);

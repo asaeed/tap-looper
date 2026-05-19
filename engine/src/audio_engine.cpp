@@ -256,6 +256,10 @@ struct AudioEngine::Impl {
             for (auto& up : samples) if (up->id == c.sample_id) { up->start_offset_frames = c.ivalue; break; }
             break;
         }
+        case CommandType::SetSampleRepeat: {
+            for (auto& up : samples) if (up->id == c.sample_id) { up->repeat = c.bvalue; break; }
+            break;
+        }
         case CommandType::SetMasterBarFrames: {
             if (c.ivalue <= 0) break;
             // Clamp to a sane range: 100ms minimum, 60s maximum
@@ -297,6 +301,7 @@ struct AudioEngine::Impl {
             ss.recorded_length_frames = s.recorded_length_frames;
             ss.recorded_offset_in_bar = s.recorded_offset_in_bar;
             ss.start_offset_frames = s.start_offset_frames;
+            ss.repeat = s.repeat;
         }
         // Also mirror the active recording (if any) so the UI shows the box during recording
         if (active_recording && n < kMaxSamples) {
@@ -309,6 +314,7 @@ struct AudioEngine::Impl {
             ss.recorded_length_frames = s.recorded_length_frames;
             ss.recorded_offset_in_bar = s.recorded_offset_in_bar;
             ss.start_offset_frames = s.start_offset_frames;
+            ss.repeat = s.repeat;
             n++;
         }
         state.sample_count = n;

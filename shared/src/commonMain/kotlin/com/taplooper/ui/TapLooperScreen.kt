@@ -13,7 +13,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.IntSize
-import com.taplooper.bridge.SampleStateKt
 import com.taplooper.domain.AppViewModel
 import com.taplooper.ui.components.*
 import com.taplooper.ui.theme.LocalTLTheme
@@ -24,7 +23,7 @@ import kotlin.math.abs
 fun TapLooperScreen(vm: AppViewModel) {
     val state by vm.state.collectAsState()
     var page by remember { mutableIntStateOf(0) }
-    var modalSample by remember { mutableStateOf<SampleStateKt?>(null) }
+    var modalSampleId by remember { mutableStateOf<Long?>(null) }
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
 
     val pulseHz = if (state.bpm > 0) state.bpm / 60f else 1f
@@ -94,7 +93,7 @@ fun TapLooperScreen(vm: AppViewModel) {
                                 },
                                 onToggleSolo = { vm.setBankSolo(bankId, !state.banks[bankId].soloed) },
                                 onSampleTap = { s -> vm.tapSample(s.id) },
-                                onSampleLongPress = { s -> modalSample = s },
+                                onSampleLongPress = { s -> modalSampleId = s.id },
                                 onSampleDragStart = { _ -> },
                                 onSampleDragMove = { _, _ -> },
                                 onSampleDragEnd = { s, off ->
@@ -116,21 +115,29 @@ fun TapLooperScreen(vm: AppViewModel) {
                 }
             }
 
-            modalSample?.let { s ->
-                SampleModal(
-                    label = "Bank ${s.bank + 1} / Sample ${s.id}",
-                    volume = s.volume,
-                    reverse = s.reverse,
-                    speed = s.speed,
-                    color = theme.bankColors[s.bank],
-                    startOffsetFrames = s.startOffsetFrames,
-                    onVolumeChange = { vm.setSampleVolume(s.id, it) },
-                    onReverseChange = { vm.setSampleReverse(s.id, it) },
-                    onSpeedChange = { vm.setSampleSpeed(s.id, it) },
-                    onStartOffsetChange = { vm.setSampleStartOffset(s.id, it) },
-                    onDelete = { vm.deleteSample(s.id) },
-                    onDismiss = { modalSample = null },
-                )
+            modalSampleId?.let { id ->
+                val s = state.samples.find { it.id == id }
+                if (s == null) {
+                    // sample was deleted; close the modal
+                    LaunchedEffect(Unit) { modalSampleId = null }
+                } else {
+                    SampleModal(
+                        label = "Bank ${s.bank + 1} / Sample ${s.id}",
+                        volume = s.volume,
+                        reverse = s.reverse,
+                        speed = s.speed,
+                        startOffsetFrames = s.startOffsetFrames,
+                        repeat = s.repeat,
+                        color = theme.bankColors[s.bank],
+                        onVolumeChange = { vm.setSampleVolume(s.id, it) },
+                        onReverseChange = { vm.setSampleReverse(s.id, it) },
+                        onSpeedChange = { vm.setSampleSpeed(s.id, it) },
+                        onStartOffsetChange = { vm.setSampleStartOffset(s.id, it) },
+                        onRepeatChange = { vm.setSampleRepeat(s.id, it) },
+                        onDelete = { vm.deleteSample(s.id) },
+                        onDismiss = { modalSampleId = null },
+                    )
+                }
             }
         }
     }

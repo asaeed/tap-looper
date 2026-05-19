@@ -23,10 +23,12 @@ fun SampleModal(
     speed: Int,
     color: Color,
     startOffsetFrames: Int,
+    repeat: Boolean,
     onVolumeChange: (Float) -> Unit,
     onReverseChange: (Boolean) -> Unit,
     onSpeedChange: (Int) -> Unit,
     onStartOffsetChange: (Int) -> Unit,
+    onRepeatChange: (Boolean) -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -45,6 +47,10 @@ fun SampleModal(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Reverse  ", color = Color.LightGray, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
                 Switch(checked = reverse, onCheckedChange = onReverseChange)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Repeat   ", color = Color.LightGray, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                Switch(checked = repeat, onCheckedChange = onRepeatChange)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(0 to "½", 1 to "1", 2 to "2").forEach { (value_, label_) ->

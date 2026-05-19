@@ -22,6 +22,7 @@ enum class CommandType : uint8_t {
   SetBankSolo,       // bank, bvalue
   SetSampleStartOffset,  // sample_id, ivalue (frames; can be negative)
   SetMasterBarFrames,    // ivalue (new master_bar_frames in frames; must be > 0)
+  SetSampleRepeat,       // sample_id, bvalue
 };
 
 struct Command {

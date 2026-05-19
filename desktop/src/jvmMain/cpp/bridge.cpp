@@ -48,7 +48,7 @@ JF(void, nativeSnapshot)(JNIEnv* env, jobject, jlong h,
     auto* eh = reinterpret_cast<EngineHandle*>(h);
     EngineState st = eh->engine->snapshot();
 
-    jsize need_longs  = 9 + kNumBanks * 3 + kMaxSamples * 9;
+    jsize need_longs  = 9 + kNumBanks * 3 + kMaxSamples * 10;
     jsize need_floats = 1 + kNumBanks + kMaxSamples * 4;
     if (env->GetArrayLength(longs_out) < need_longs ||
         env->GetArrayLength(floats_out) < need_floats) return;
@@ -76,7 +76,7 @@ JF(void, nativeSnapshot)(JNIEnv* env, jobject, jlong h,
     }
     for (int i = 0; i < kMaxSamples; ++i) {
         if (i >= st.sample_count) {
-            for (int k = 0; k < 9; ++k) L[Lp++] = 0;
+            for (int k = 0; k < 10; ++k) L[Lp++] = 0;
             for (int k = 0; k < 4; ++k) F[Fp++] = 0.f;
             continue;
         }
@@ -86,6 +86,7 @@ JF(void, nativeSnapshot)(JNIEnv* env, jobject, jlong h,
         L[Lp++] = s.playing ? 1 : 0; L[Lp++] = s.recording ? 1 : 0;
         L[Lp++] = s.recorded_length_frames; L[Lp++] = s.recorded_offset_in_bar;
         L[Lp++] = jlong(s.start_offset_frames);
+        L[Lp++] = s.repeat ? 1 : 0;
         F[Fp++] = s.volume; F[Fp++] = s.reverse ? 1.f : 0.f;
         F[Fp++] = s.position_x; F[Fp++] = s.position_y;
     }

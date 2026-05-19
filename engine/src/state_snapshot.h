@@ -20,6 +20,7 @@ struct SampleState {
     Frames recorded_length_frames;
     Frames recorded_offset_in_bar;
     int32_t start_offset_frames;
+    bool repeat;
 };
 
 struct BankState {

@@ -20,6 +20,7 @@ Sample::Sample(SampleId id_, BankId bank_, Frames capacity_frames_, int channels
       position_x(0.f),
       position_y(0.f),
       start_offset_frames(0),
+      repeat(false),
       channels(channels_),
       capacity_frames(capacity_frames_) {}
 
