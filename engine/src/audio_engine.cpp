@@ -220,13 +220,7 @@ void AudioEngine::process(const float* in, float* out, int frame_count) {
         impl_->state.recording_duration_frames = impl_->active_recording->recorded_length_frames;
     }
 
-    // 4. Advance global play head
-    if (impl_->state.master_bar_frames > 0) {
-        impl_->global_play_head =
-            (impl_->global_play_head + Frames(frame_count)) % impl_->state.master_bar_frames;
-    }
-
-    // 5. Zero output then mix
+    // 4. Zero output then mix (using current play_head)
     std::memset(out, 0, sizeof(float) * size_t(frame_count) * kChannels);
     {
         std::vector<Sample*> ptrs;
@@ -234,6 +228,12 @@ void AudioEngine::process(const float* in, float* out, int frame_count) {
         for (auto& up : impl_->samples) ptrs.push_back(up.get());
         mix(ptrs, impl_->state.banks, impl_->state.master_bar_frames,
             impl_->global_play_head, frame_count, out);
+    }
+
+    // 5. Advance global play head (AFTER mix)
+    if (impl_->state.master_bar_frames > 0) {
+        impl_->global_play_head =
+            (impl_->global_play_head + Frames(frame_count)) % impl_->state.master_bar_frames;
     }
 
     // 6. Publish state

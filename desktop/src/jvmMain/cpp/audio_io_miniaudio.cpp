@@ -19,8 +19,9 @@ public:
         cfg.capture.channels   = kChannels;
         cfg.playback.format    = ma_format_f32;
         cfg.playback.channels  = kChannels;
-        cfg.periodSizeInFrames = 256;       // ~5ms at 48kHz; tweak after measurement
+        cfg.periodSizeInFrames = 128;                           // ~2.7ms at 48kHz; was 256
         cfg.periods            = 2;
+        cfg.performanceProfile = ma_performance_profile_low_latency;   // NEW
         cfg.dataCallback       = &OnAudio;
         cfg.pUserData          = this;
 
@@ -28,6 +29,12 @@ public:
             std::fprintf(stderr, "miniaudio: device init failed\n");
             return false;
         }
+        std::fprintf(stderr,
+            "[miniaudio] sample_rate=%u, playback_period=%u, capture_period=%u, internal_periods=%u\n",
+            (unsigned)device_.sampleRate,
+            (unsigned)device_.playback.internalPeriodSizeInFrames,
+            (unsigned)device_.capture.internalPeriodSizeInFrames,
+            (unsigned)device_.playback.internalPeriods);
         if (ma_device_start(&device_) != MA_SUCCESS) {
             std::fprintf(stderr, "miniaudio: device start failed\n");
             ma_device_uninit(&device_);
