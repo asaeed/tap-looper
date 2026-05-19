@@ -136,6 +136,31 @@ struct AudioEngine::Impl {
             }
             // ────────────────────────────────────────────────────────────────
 
+            // ── Apply edge fades to eliminate click/pop at playback start
+            //    and at the loop-wrap boundary (where end-of-loop meets the
+            //    next start). 2 ms linear ramps on both ends. Capped to 25%
+            //    of the recording length so short samples aren't dominated.
+            {
+                constexpr Frames kFadeBase = 96;   // 2 ms at 48 kHz
+                Frames fade_len = std::min(kFadeBase, rec.recorded_length_frames / 4);
+                if (fade_len > 0) {
+                    for (Frames f = 0; f < fade_len; ++f) {
+                        float gain = float(f + 1) / float(fade_len + 1);
+                        for (int ch = 0; ch < rec.channels; ++ch) {
+                            rec.pcm[f * rec.channels + ch] *= gain;
+                        }
+                    }
+                    for (Frames f = 0; f < fade_len; ++f) {
+                        float gain = float(f + 1) / float(fade_len + 1);
+                        Frames pos = rec.recorded_length_frames - 1 - f;
+                        for (int ch = 0; ch < rec.channels; ++ch) {
+                            rec.pcm[pos * rec.channels + ch] *= gain;
+                        }
+                    }
+                }
+            }
+            // ────────────────────────────────────────────────────────────────
+
             Frames len = active_recording->recorded_length_frames;
             Frames min_frames = Frames(sample_rate * kMinRecordingMs / 1000);
             if (len < min_frames) {
