@@ -252,6 +252,24 @@ struct AudioEngine::Impl {
         case CommandType::SetMasterPlaying:
             state.master_playing = c.bvalue;
             break;
+        case CommandType::SetSampleStartOffset: {
+            for (auto& up : samples) if (up->id == c.sample_id) { up->start_offset_frames = c.ivalue; break; }
+            break;
+        }
+        case CommandType::SetMasterBarFrames: {
+            if (c.ivalue <= 0) break;
+            // Clamp to a sane range: 100ms minimum, 60s maximum
+            Frames new_L = Frames(c.ivalue);
+            Frames min_L = Frames(sample_rate / 10);          // 100ms
+            Frames max_L = Frames(sample_rate * 60);          // 60s
+            if (new_L < min_L) new_L = min_L;
+            if (new_L > max_L) new_L = max_L;
+            state.master_bar_frames = new_L;
+            rolling = RollingBuffer(new_L, kChannels);
+            // Wrap global_play_head into the new range
+            global_play_head = global_play_head % new_L;
+            break;
+        }
         default: break; // other commands implemented in later tasks
         }
     }
@@ -278,6 +296,7 @@ struct AudioEngine::Impl {
             ss.position_x = s.position_x; ss.position_y = s.position_y;
             ss.recorded_length_frames = s.recorded_length_frames;
             ss.recorded_offset_in_bar = s.recorded_offset_in_bar;
+            ss.start_offset_frames = s.start_offset_frames;
         }
         // Also mirror the active recording (if any) so the UI shows the box during recording
         if (active_recording && n < kMaxSamples) {
@@ -289,6 +308,7 @@ struct AudioEngine::Impl {
             ss.position_x = s.position_x; ss.position_y = s.position_y;
             ss.recorded_length_frames = s.recorded_length_frames;
             ss.recorded_offset_in_bar = s.recorded_offset_in_bar;
+            ss.start_offset_frames = s.start_offset_frames;
             n++;
         }
         state.sample_count = n;

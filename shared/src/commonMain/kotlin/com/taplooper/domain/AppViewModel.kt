@@ -51,4 +51,8 @@ class AppViewModel {
         bridge.submit(CT.SetMasterPlaying, bvalue = playing)
     fun setBankSolo(bank: Int, soloed: Boolean) =
         bridge.submit(CT.SetBankSolo, bank = bank, bvalue = soloed)
+    fun setSampleStartOffset(id: Long, frames: Int) =
+        bridge.submit(com.taplooper.bridge.CommandType.SetSampleStartOffset, sampleId = id, ivalue = frames)
+    fun setMasterBarFrames(frames: Int) =
+        bridge.submit(com.taplooper.bridge.CommandType.SetMasterBarFrames, ivalue = frames)
 }

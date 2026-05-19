@@ -18,4 +18,6 @@ object CommandType {
     const val Reset            = 14
     const val SetMasterPlaying = 15
     const val SetBankSolo      = 16
+    const val SetSampleStartOffset = 17
+    const val SetMasterBarFrames   = 18
 }

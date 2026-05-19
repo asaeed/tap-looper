@@ -73,8 +73,11 @@ void mix(const std::vector<Sample*>& samples,
             float rate = speed_ratio(sm.speed);
             for (int i = 0; i < frame_count; ++i) {
                 if (pos >= float(sm.recorded_length_frames)) { sm.playing = false; break; }
+                float read_pos = pos + float(sm.start_offset_frames);
+                if (read_pos < 0.f) read_pos = 0.f;
+                if (read_pos >= float(sm.recorded_length_frames)) { pos += rate; continue; } // silence past end
                 for (int c = 0; c < kChannels; ++c) {
-                    out[i * kChannels + c] += read_sample_lerp(sm, pos, c) * gain;
+                    out[i * kChannels + c] += read_sample_lerp(sm, read_pos, c) * gain;
                 }
                 pos += rate;
             }
@@ -105,7 +108,18 @@ void mix(const std::vector<Sample*>& samples,
                     }
                 }
                 if (!inside) continue;
-                float pos = float(local) * speed_ratio(s.speed);
+                // Apply the per-sample start offset (rotates the playback within the PCM)
+                int32_t off = s.start_offset_frames;
+                Frames effective_local;
+                if (s.recorded_length_frames == 0) {
+                    effective_local = 0;
+                } else {
+                    int64_t shifted = int64_t(local) + int64_t(off);
+                    int64_t len = int64_t(s.recorded_length_frames);
+                    int64_t mod = ((shifted % len) + len) % len;
+                    effective_local = Frames(mod);
+                }
+                float pos = float(effective_local) * speed_ratio(s.speed);
                 for (int c = 0; c < kChannels; ++c) {
                     out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
                 }
@@ -119,7 +133,18 @@ void mix(const std::vector<Sample*>& samples,
                 Frames absolute = (play_head + Frames(i)) % loop_len;
                 if (absolute >= sample_len) continue; // trailing silence within iteration
                 Frames local = absolute; // reverse handled by read_sample_lerp
-                float pos = float(local) * speed_ratio(s.speed);
+                // Apply the per-sample start offset (rotates the playback within the PCM)
+                int32_t off = s.start_offset_frames;
+                Frames effective_local;
+                if (s.recorded_length_frames == 0) {
+                    effective_local = 0;
+                } else {
+                    int64_t shifted = int64_t(local) + int64_t(off);
+                    int64_t len = int64_t(s.recorded_length_frames);
+                    int64_t mod = ((shifted % len) + len) % len;
+                    effective_local = Frames(mod);
+                }
+                float pos = float(effective_local) * speed_ratio(s.speed);
                 for (int c = 0; c < kChannels; ++c) {
                     out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
                 }

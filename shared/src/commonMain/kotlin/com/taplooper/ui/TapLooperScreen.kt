@@ -106,20 +106,28 @@ fun TapLooperScreen(vm: AppViewModel) {
                             )
                         }
                     }
-                    BottomBar(bpm = state.bpm, beatsPerBar = state.beatsPerBar) { v ->
-                        vm.setBeatsPerBar(v)
-                    }
+                    BottomBar(
+                        bpm = state.bpm,
+                        beatsPerBar = state.beatsPerBar,
+                        masterBarFrames = state.masterBarFrames,
+                        onChangeBeats = { v -> vm.setBeatsPerBar(v) },
+                        onChangeMasterBarFrames = { v -> vm.setMasterBarFrames(v) },
+                    )
                 }
             }
 
             modalSample?.let { s ->
                 SampleModal(
                     label = "Bank ${s.bank + 1} / Sample ${s.id}",
-                    volume = s.volume, reverse = s.reverse, speed = s.speed,
+                    volume = s.volume,
+                    reverse = s.reverse,
+                    speed = s.speed,
                     color = theme.bankColors[s.bank],
+                    startOffsetFrames = s.startOffsetFrames,
                     onVolumeChange = { vm.setSampleVolume(s.id, it) },
                     onReverseChange = { vm.setSampleReverse(s.id, it) },
                     onSpeedChange = { vm.setSampleSpeed(s.id, it) },
+                    onStartOffsetChange = { vm.setSampleStartOffset(s.id, it) },
                     onDelete = { vm.deleteSample(s.id) },
                     onDismiss = { modalSample = null },
                 )

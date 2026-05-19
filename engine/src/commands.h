@@ -20,6 +20,8 @@ enum class CommandType : uint8_t {
   Reset,             // wipes all samples, resets master_bar_frames, etc.
   SetMasterPlaying,  // bvalue: true=play, false=stop
   SetBankSolo,       // bank, bvalue
+  SetSampleStartOffset,  // sample_id, ivalue (frames; can be negative)
+  SetMasterBarFrames,    // ivalue (new master_bar_frames in frames; must be > 0)
 };
 
 struct Command {

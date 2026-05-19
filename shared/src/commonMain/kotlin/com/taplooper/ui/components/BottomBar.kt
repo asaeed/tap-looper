@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.sp
 import com.taplooper.ui.theme.LocalTLTheme
 
 @Composable
-fun BottomBar(bpm: Float, beatsPerBar: Int, onChangeBeats: (Int) -> Unit) {
+fun BottomBar(bpm: Float, beatsPerBar: Int, masterBarFrames: Int, onChangeBeats: (Int) -> Unit, onChangeMasterBarFrames: (Int) -> Unit) {
     val theme = LocalTLTheme.current
     Row(
         Modifier.fillMaxWidth().padding(8.dp),
@@ -40,6 +40,22 @@ fun BottomBar(bpm: Float, beatsPerBar: Int, onChangeBeats: (Int) -> Unit) {
                     .padding(horizontal = 8.dp, vertical = 2.dp)
             ) { Text(label, color = theme.bankColors[0], fontFamily = FontFamily.Monospace, fontSize = 11.sp) }
             Spacer(Modifier.width(8.dp))
+        }
+        if (masterBarFrames > 0) {
+            Spacer(Modifier.width(16.dp))
+            val lengthMs = masterBarFrames * 1000 / 48000
+            Text("L ${lengthMs}ms", color = theme.text, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+            Spacer(Modifier.width(6.dp))
+            listOf(-240 to "−5ms", 240 to "+5ms").forEach { (delta, label) ->
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(0xFF111111))
+                        .clickable { onChangeMasterBarFrames(masterBarFrames + delta) }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) { Text(label, color = theme.bankColors[2], fontFamily = FontFamily.Monospace, fontSize = 10.sp) }
+                Spacer(Modifier.width(4.dp))
+            }
         }
     }
 }

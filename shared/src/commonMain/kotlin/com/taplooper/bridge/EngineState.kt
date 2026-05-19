@@ -13,6 +13,7 @@ data class SampleStateKt(
     val positionY: Float,
     val recordedLengthFrames: Int,
     val recordedOffsetInBar: Int,
+    val startOffsetFrames: Int,
 )
 
 data class BankStateKt(

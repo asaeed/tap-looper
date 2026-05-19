@@ -19,6 +19,7 @@ Sample::Sample(SampleId id_, BankId bank_, Frames capacity_frames_, int channels
       one_shot_play_pos(0),
       position_x(0.f),
       position_y(0.f),
+      start_offset_frames(0),
       channels(channels_),
       capacity_frames(capacity_frames_) {}
 

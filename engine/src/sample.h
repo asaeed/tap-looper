@@ -23,6 +23,8 @@ struct Sample {
     Frames one_shot_play_pos;  // current playback position when ONE-SHOT is firing; advances each block
     float position_x, position_y;
 
+    int32_t start_offset_frames;   // can be negative; rotates PCM at playback (LOOP) or shifts start position (ONE-SHOT)
+
     int channels;
     Frames capacity_frames;
 

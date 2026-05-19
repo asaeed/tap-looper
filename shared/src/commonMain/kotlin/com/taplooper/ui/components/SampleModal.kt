@@ -21,9 +21,11 @@ fun SampleModal(
     reverse: Boolean,
     speed: Int,
     color: Color,
+    startOffsetFrames: Int,
     onVolumeChange: (Float) -> Unit,
     onReverseChange: (Boolean) -> Unit,
     onSpeedChange: (Int) -> Unit,
+    onStartOffsetChange: (Int) -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -52,6 +54,13 @@ fun SampleModal(
                     ) { Text(label_, color = if (speed == value_) Color.Black else Color.White) }
                 }
             }
+            val startOffsetMs = startOffsetFrames * 1000 / 48000
+            Text("Start shift  ${startOffsetMs}ms", color = Color.LightGray, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+            Slider(
+                value = startOffsetFrames.toFloat(),
+                onValueChange = { onStartOffsetChange(it.toInt()) },
+                valueRange = -24000f..24000f,    // ±500ms at 48 kHz
+            )
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = { onDelete(); onDismiss() },
