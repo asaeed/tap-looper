@@ -22,8 +22,10 @@ fun BottomBar(
     bpm: Float,
     beatsPerBar: Int,
     masterBarFrames: Int,
+    extraLatencyFrames: Int,
     onChangeBeats: (Int) -> Unit,
     onChangeMasterBarFrames: (Int) -> Unit,
+    onChangeExtraLatency: (Int) -> Unit,
 ) {
     val theme = LocalTLTheme.current
     Row(
@@ -67,6 +69,27 @@ fun BottomBar(
                         }
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) { Text(label, color = theme.bankColors[2], fontFamily = FontFamily.Monospace, fontSize = 10.sp) }
+                Spacer(Modifier.width(4.dp))
+            }
+
+            // ±2ms latency nudge — lets the user align subsequent recordings by ear.
+            Spacer(Modifier.width(12.dp))
+            val latMs = extraLatencyFrames * 1000 / kSampleRate
+            Text(
+                "LAT ${if (latMs >= 0) "+" else ""}${latMs}ms",
+                color = theme.text,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp
+            )
+            Spacer(Modifier.width(4.dp))
+            listOf(-96 to "−2", 96 to "+2").forEach { (delta, label) ->
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(0xFF111111))
+                        .clickable { onChangeExtraLatency(extraLatencyFrames + delta) }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) { Text(label, color = theme.bankColors[3], fontFamily = FontFamily.Monospace, fontSize = 10.sp) }
                 Spacer(Modifier.width(4.dp))
             }
         }

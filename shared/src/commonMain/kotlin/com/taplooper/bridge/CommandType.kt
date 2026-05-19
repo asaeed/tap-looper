@@ -21,4 +21,5 @@ object CommandType {
     const val SetSampleStartOffset = 17
     const val SetMasterBarFrames   = 18
     const val SetSampleRepeat      = 19
+    const val SetExtraLatencyFrames = 20
 }

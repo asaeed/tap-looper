@@ -109,8 +109,10 @@ fun TapLooperScreen(vm: AppViewModel) {
                         bpm = state.bpm,
                         beatsPerBar = state.beatsPerBar,
                         masterBarFrames = state.masterBarFrames,
+                        extraLatencyFrames = state.extraLatencyFrames,
                         onChangeBeats = { v -> vm.setBeatsPerBar(v) },
                         onChangeMasterBarFrames = { v -> vm.setMasterBarFrames(v) },
+                        onChangeExtraLatency = { v -> vm.setExtraLatencyFrames(v) },
                     )
                 }
             }

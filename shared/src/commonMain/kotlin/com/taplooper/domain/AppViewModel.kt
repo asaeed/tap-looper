@@ -57,4 +57,6 @@ class AppViewModel {
         bridge.submit(com.taplooper.bridge.CommandType.SetMasterBarFrames, ivalue = frames)
     fun setSampleRepeat(id: Long, repeat: Boolean) =
         bridge.submit(com.taplooper.bridge.CommandType.SetSampleRepeat, sampleId = id, bvalue = repeat)
+    fun setExtraLatencyFrames(frames: Int) =
+        bridge.submit(com.taplooper.bridge.CommandType.SetExtraLatencyFrames, ivalue = frames)
 }

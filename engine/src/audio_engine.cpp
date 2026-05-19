@@ -24,6 +24,7 @@ struct AudioEngine::Impl {
     int sample_rate{kSampleRate};
     Frames global_play_head{0};   // wraps modulo master_bar_frames once set
     int round_trip_latency_frames{0};
+    int extra_latency_frames{0};
 
     Impl() { init_default_state(state); publisher.publish(state); }
 
@@ -42,7 +43,8 @@ struct AudioEngine::Impl {
                 // was emitted ~output_latency ago, and their played notes arrive at
                 // the engine ~input_latency late. Shifting the offset backward by
                 // round_trip_latency makes the playback land in sync with the loop.
-                Frames latency = Frames(round_trip_latency_frames);
+                // extra_latency_frames is a user-tunable ±offset for fine alignment.
+                Frames latency = Frames(round_trip_latency_frames + extra_latency_frames);
                 Frames L = state.master_bar_frames;
                 Frames adjusted = (global_play_head + L - (latency % L)) % L;
                 active_recording->recorded_offset_in_bar = adjusted;
@@ -56,19 +58,82 @@ struct AudioEngine::Impl {
             active_recording->recording = false;
 
             // ── Trim leading silence ────────────────────────────────────────
-            // Find the first frame with amplitude above threshold across any channel.
+            // Find the loudest onset in the first 500ms and trim to it.
+            // A trackpad/mouse click registers as a quieter transient (≈0.05–0.20)
+            // than a drum hit (≈0.4–1.0). By picking the loudest onset instead of
+            // the first audible frame, we skip the click and land on the real audio.
             constexpr float kSilenceThreshold = 0.02f;  // ~-34 dB
+            constexpr float kOnsetThreshold = 0.05f;
+            constexpr Frames kMinSilenceBetween = 480;        // 10ms at 48kHz
+            constexpr Frames kClickScanFrames = 24000;        // first 500ms only
+
             Sample& rec = *active_recording;
             Frames first_audible = 0;
             bool found_audible = false;
-            for (Frames f = 0; f < rec.recorded_length_frames; ++f) {
-                bool audible = false;
-                for (int ch = 0; ch < rec.channels; ++ch) {
-                    if (std::abs(rec.pcm[f * rec.channels + ch]) > kSilenceThreshold) {
-                        audible = true; break;
+            {
+                // Step A: find the very first audible frame at low threshold.
+                for (Frames f = 0; f < rec.recorded_length_frames; ++f) {
+                    bool audible = false;
+                    for (int ch = 0; ch < rec.channels; ++ch) {
+                        if (std::abs(rec.pcm[f * rec.channels + ch]) > kSilenceThreshold) {
+                            audible = true; break;
+                        }
+                    }
+                    if (audible) { first_audible = f; found_audible = true; break; }
+                }
+
+                // Step B: within the first 500ms, find ALL onsets and pick the loudest.
+                if (found_audible) {
+                    Frames scan_end = std::min<Frames>(rec.recorded_length_frames, kClickScanFrames);
+                    Frames loudest_onset = first_audible;
+                    float loudest_peak = 0.f;
+
+                    Frames cur_onset_start = 0;
+                    float cur_peak = 0.f;
+                    bool in_onset = false;
+                    Frames silence_run = kMinSilenceBetween;  // start as if already silent
+
+                    for (Frames f = first_audible; f < scan_end; ++f) {
+                        float amp = 0.f;
+                        for (int ch = 0; ch < rec.channels; ++ch) {
+                            float v = std::abs(rec.pcm[f * rec.channels + ch]);
+                            if (v > amp) amp = v;
+                        }
+                        bool above = amp > kOnsetThreshold;
+                        if (above) {
+                            if (!in_onset && silence_run >= kMinSilenceBetween) {
+                                in_onset = true;
+                                cur_onset_start = f;
+                                cur_peak = amp;
+                            } else if (in_onset && amp > cur_peak) {
+                                cur_peak = amp;
+                            }
+                            silence_run = 0;
+                        } else {
+                            if (in_onset) {
+                                if (cur_peak > loudest_peak) {
+                                    loudest_peak = cur_peak;
+                                    loudest_onset = cur_onset_start;
+                                }
+                                in_onset = false;
+                            }
+                            ++silence_run;
+                        }
+                    }
+                    if (in_onset && cur_peak > loudest_peak) {
+                        loudest_peak = cur_peak;
+                        loudest_onset = cur_onset_start;
+                    }
+
+                    // Prefer the loudest onset if it is significantly later than
+                    // the first audible point AND notably loud (real audio, not click).
+                    if (loudest_onset > first_audible && loudest_peak > 0.10f) {
+                        std::fprintf(stderr,
+                            "[engine] loudest-onset trim: first_audible=%u, loudest_onset=%u, peak=%.3f\n",
+                            (unsigned)first_audible, (unsigned)loudest_onset, loudest_peak);
+                        first_audible = loudest_onset;
                     }
                 }
-                if (audible) { first_audible = f; found_audible = true; break; }
             }
             if (found_audible && first_audible > 0 && first_audible < rec.recorded_length_frames) {
                 // Shift PCM backward by first_audible frames.
@@ -98,7 +163,7 @@ struct AudioEngine::Impl {
             // user played (typically the kick they used to signal stop). Trim the
             // recording to end at that onset, so when looped, the wrap from end to
             // start IS the rhythmic downbeat — no doubled-up "1" kick at the boundary.
-            constexpr float kOnsetThreshold = 0.05f;          // ~-26 dB
+            // (kOnsetThreshold declared above in leading-trim section; 0.05f / ~-26 dB)
             constexpr Frames kMinSilenceBetweenOnsets = 480;  // 10 ms at 48 kHz
 
             Frames last_onset_pos = 0;
@@ -313,6 +378,10 @@ struct AudioEngine::Impl {
             global_play_head = global_play_head % new_L;
             break;
         }
+        case CommandType::SetExtraLatencyFrames:
+            extra_latency_frames = c.ivalue;
+            state.extra_latency_frames = c.ivalue;
+            break;
         default: break; // other commands implemented in later tasks
         }
     }
@@ -358,6 +427,7 @@ struct AudioEngine::Impl {
         }
         state.sample_count = n;
         state.bpm = float(derive_bpm(state.master_bar_frames, state.beats_per_bar, sample_rate));
+        state.extra_latency_frames = extra_latency_frames;
         state.version++;
         publisher.publish(state);
     }
@@ -412,6 +482,10 @@ int AudioEngine::sample_rate() const { return impl_->sample_rate; }
 
 void AudioEngine::set_round_trip_latency_frames(int frames) {
     impl_->round_trip_latency_frames = frames;
+}
+
+void AudioEngine::set_extra_latency_frames(int frames) {
+    impl_->extra_latency_frames = frames;
 }
 
 } // namespace tl

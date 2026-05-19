@@ -30,6 +30,11 @@ public:
   // so they play back in sync with what the user heard during recording.
   void set_round_trip_latency_frames(int frames);
 
+  // User-tunable ±offset added on top of the auto-computed round-trip latency.
+  // Positive = delay the recorded offset (loop starts later in the bar);
+  // negative = advance it. Nudge by ±96 frames (2 ms at 48 kHz) by ear.
+  void set_extra_latency_frames(int frames);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

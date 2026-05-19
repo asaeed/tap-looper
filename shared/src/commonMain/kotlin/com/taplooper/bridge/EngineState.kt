@@ -35,6 +35,7 @@ data class EngineStateKt(
     val masterBarFrames: Int,
     val beatsPerBar: Int,
     val masterPlaying: Boolean,
+    val extraLatencyFrames: Int,
     val bpm: Float,
     val version: Long,
 )

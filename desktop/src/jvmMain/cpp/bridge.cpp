@@ -48,7 +48,7 @@ JF(void, nativeSnapshot)(JNIEnv* env, jobject, jlong h,
     auto* eh = reinterpret_cast<EngineHandle*>(h);
     EngineState st = eh->engine->snapshot();
 
-    jsize need_longs  = 9 + kNumBanks * 3 + kMaxSamples * 10;
+    jsize need_longs  = 10 + kNumBanks * 3 + kMaxSamples * 10;
     jsize need_floats = 1 + kNumBanks + kMaxSamples * 4;
     if (env->GetArrayLength(longs_out) < need_longs ||
         env->GetArrayLength(floats_out) < need_floats) return;
@@ -65,9 +65,10 @@ JF(void, nativeSnapshot)(JNIEnv* env, jobject, jlong h,
     L[6] = jlong(st.recording_sample_id);
     L[7] = st.beats_per_bar;
     L[8] = st.master_playing ? 1 : 0;
+    L[9] = jlong(st.extra_latency_frames);
 
     F[0] = st.bpm;
-    int Lp = 9, Fp = 1;
+    int Lp = 10, Fp = 1;
     for (int i = 0; i < kNumBanks; ++i) {
         L[Lp++] = int(st.banks[i].mode);
         L[Lp++] = st.banks[i].muted ? 1 : 0;

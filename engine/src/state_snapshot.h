@@ -43,6 +43,7 @@ struct EngineState {
     int beats_per_bar;
     float bpm;
     bool master_playing;
+    int32_t extra_latency_frames;
     uint64_t version;
 };
 
