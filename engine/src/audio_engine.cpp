@@ -187,7 +187,21 @@ struct AudioEngine::Impl {
         case CommandType::SetBankSolo:    state.banks[c.bank].soloed = c.bvalue; break;
         case CommandType::SetBankMute:    state.banks[c.bank].muted = c.bvalue; break;
         case CommandType::SetBankVolume:  state.banks[c.bank].volume = c.fvalue; break;
-        case CommandType::SetBankMode:    state.banks[c.bank].mode = c.ivalue == 1 ? BankMode::OneShot : BankMode::Loop; break;
+        case CommandType::SetBankMode: {
+            BankMode new_mode = c.ivalue == 1 ? BankMode::OneShot : BankMode::Loop;
+            if (state.banks[c.bank].mode != new_mode) {
+                state.banks[c.bank].mode = new_mode;
+                // Reset playback state for samples in this bank.
+                // Looping samples stop; one-shots wait for explicit trigger.
+                for (auto& up : samples) {
+                    if (up->bank != c.bank) continue;
+                    up->enabled = false;
+                    up->playing = false;
+                    up->one_shot_play_pos = 0;
+                }
+            }
+            break;
+        }
 
         case CommandType::SetSampleVolume: {
             for (auto& up : samples) if (up->id == c.sample_id) { up->volume = c.fvalue; break; }
