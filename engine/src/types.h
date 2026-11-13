@@ -13,4 +13,5 @@ constexpr int  kChannels         = 2;          // stereo output
 constexpr Frames kMaxRecFrames   = kSampleRate * 60; // 60s preallocated for active recording
 constexpr int  kMinRecordingMs   = 200;
 constexpr Frames kFallbackBufferFrames = kSampleRate * 8; // pre-L rolling buffer fallback
+constexpr int  kEnvBins          = 32;         // per-sample waveform envelope bins (UI thumbnail)
 }

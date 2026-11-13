@@ -48,8 +48,10 @@ JF(void, nativeSnapshot)(JNIEnv* env, jobject, jlong h,
     auto* eh = reinterpret_cast<EngineHandle*>(h);
     EngineState st = eh->engine->snapshot();
 
-    jsize need_longs  = 10 + kNumBanks * 3 + kMaxSamples * 10;
-    jsize need_floats = 1 + kNumBanks + kMaxSamples * 4;
+    // Layout must stay in sync with EngineBridge.kt::snapshot()
+    // (see docs/architecture.md — JNI marshalling format).
+    jsize need_longs  = 11 + kNumBanks * 3 + kMaxSamples * 10;
+    jsize need_floats = 2 + kNumBanks + kMaxSamples * (4 + kEnvBins);
     if (env->GetArrayLength(longs_out) < need_longs ||
         env->GetArrayLength(floats_out) < need_floats) return;
 
@@ -66,9 +68,11 @@ JF(void, nativeSnapshot)(JNIEnv* env, jobject, jlong h,
     L[7] = st.beats_per_bar;
     L[8] = st.master_playing ? 1 : 0;
     L[9] = jlong(st.extra_latency_frames);
+    L[10] = st.metronome ? 1 : 0;
 
     F[0] = st.bpm;
-    int Lp = 10, Fp = 1;
+    F[1] = st.input_peak;
+    int Lp = 11, Fp = 2;
     for (int i = 0; i < kNumBanks; ++i) {
         L[Lp++] = int(st.banks[i].mode);
         L[Lp++] = st.banks[i].muted ? 1 : 0;
@@ -78,7 +82,7 @@ JF(void, nativeSnapshot)(JNIEnv* env, jobject, jlong h,
     for (int i = 0; i < kMaxSamples; ++i) {
         if (i >= st.sample_count) {
             for (int k = 0; k < 10; ++k) L[Lp++] = 0;
-            for (int k = 0; k < 4; ++k) F[Fp++] = 0.f;
+            for (int k = 0; k < 4 + kEnvBins; ++k) F[Fp++] = 0.f;
             continue;
         }
         const SampleState& s = st.samples[i];
@@ -90,8 +94,22 @@ JF(void, nativeSnapshot)(JNIEnv* env, jobject, jlong h,
         L[Lp++] = s.repeat ? 1 : 0;
         F[Fp++] = s.volume; F[Fp++] = s.reverse ? 1.f : 0.f;
         F[Fp++] = s.position_x; F[Fp++] = s.position_y;
+        for (int k = 0; k < kEnvBins; ++k) F[Fp++] = s.env[k];
     }
 
     env->ReleaseLongArrayElements(longs_out, L, 0);
     env->ReleaseFloatArrayElements(floats_out, F, 0);
+}
+
+JF(jint, nativeExport)(JNIEnv* env, jobject, jlong h, jstring dir) {
+    auto* eh = reinterpret_cast<EngineHandle*>(h);
+    const char* path = env->GetStringUTFChars(dir, nullptr);
+    if (!path) return 0;
+    // Stop the audio device so export_session can safely walk RT-owned
+    // sample data from this thread, then restart it.
+    eh->io->stop();
+    jint written = eh->engine->export_session(path);
+    eh->io->start(*eh->engine);
+    env->ReleaseStringUTFChars(dir, path);
+    return written;
 }

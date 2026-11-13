@@ -15,10 +15,12 @@ internal `samples` vector (a `std::vector<std::unique_ptr<Sample>>`).
 | Field | Type | Meaning |
 |-------|------|---------|
 | `id` | `SampleId` (`uint64_t`) | Monotonically increasing, assigned at allocation |
-| `recorded_length_frames` | `Frames` (`uint32_t`) | PCM length after trim; never changes post-record |
-| `recorded_offset_in_bar` | `Frames` | Bar-relative playback position; set at StartRecording with latency compensation |
-| `pcm` | `std::vector<float>` | Interleaved stereo samples |
+| `recorded_length_frames` | `Frames` (`uint32_t`) | PCM length after bar quantization; never changes post-record |
+| `recorded_offset_in_bar` | `Frames` | Bar-relative playback position; `recorded_start_total mod L` |
+| `recorded_start_total` | `int64_t` | Absolute timeline position where recording started (latency-compensated); multi-bar playback anchor |
+| `pcm` | `std::vector<float>` | Interleaved stereo samples (shrunk to recorded length at StopRecording) |
 | `is_master_loop` | `bool` | True for the first recorded loop; affects play-head init and LAT-shift exclusion |
+| `env` | `float[kEnvBins]` | 32-bin peak envelope computed once post-record (UI waveform thumbnail) |
 
 **Mutable (commands change these at any time)**
 
@@ -43,8 +45,19 @@ the PCM and `recorded_offset_in_bar` untouched.
 
 ### StartRecording (`CommandType::StartRecording`)
 
-Allocates a new `Sample` with capacity `kMaxRecFrames` (60 s at 48 kHz = 2,880,000 frames).
-Position x/y are taken from the `Command.fx/fy` fields (normalised bank coordinates).
+Ignored when the engine already holds `kMaxSamples` (64) samples — the UI grid cannot
+show more. Otherwise allocates a new `Sample` with capacity `kMaxRecFrames` (60 s at
+48 kHz = 2,880,000 frames) and sets `state.focused_bank` to the target bank (CAPTURE
+targets the last-touched bank). Position x/y are taken from the `Command.fx/fy` fields
+(normalised bank coordinates).
+
+If the recording reaches the 60 s capacity, the engine auto-applies `StopRecording`
+instead of silently freezing the duration counter.
+
+### CancelRecording (`CommandType::CancelRecording`)
+
+Discards the active recording without creating a sample. The UI sends this when a
+gesture that started a recording on press-down turns out to be a page swipe.
 
 If a master bar length `L` already exists, the recorded offset is computed with latency
 compensation:
@@ -65,44 +78,24 @@ same input into the rolling buffer for `CaptureLastLoop`.
 
 ### StopRecording (`CommandType::StopRecording`)
 
+The loop is exactly the span the user bounded: recording starts when the box is
+created (press-down) and ends at the stop press. There is NO content trimming —
+leading silence is performance space, and earlier onset-detection trims (leading
+silence / loudest onset / trailing onset) moved the loop boundaries away from the
+user's gestures and were removed.
+
 The stop sequence applies four post-processing steps in order:
 
-#### 1. Leading-silence trim + loudest-onset detection
+#### 1. Bar-grid length quantization (non-master, longer than a bar)
 
-Constants:
-- `kSilenceThreshold = 0.02f` (~-34 dB) — minimum amplitude to be considered "audible"
-- `kOnsetThreshold = 0.05f` (~-26 dB) — minimum amplitude to be considered an onset
-- `kMinSilenceBetween = 480` frames (10 ms at 48 kHz) — gap required between distinct onsets
-- `kClickScanFrames = 24000` frames (500 ms) — scan window for click detection
+Playback of multi-bar loops cycles in whole bars, so a 3.9-bar take would wrap
+mid-phrase (or leave a silence gap) at the seam. The recorded length is snapped to
+the nearest whole bar: `target = round(len / L) * L` — the overhang is truncated, or
+the tail is padded with silence (with a short fade at the content edge). Trimmed
+audio is never restored, so the stop-click stays gone. Sub-bar takes are untouched —
+they already play as a per-bar window.
 
-Step A scans forward from frame 0 for the first frame above `kSilenceThreshold` —
-this is `first_audible`.
-
-Step B then scans the first 500 ms for all distinct onsets above `kOnsetThreshold`,
-tracking the loudest peak found. A trackpad or mouse click registers as a soft transient
-(peak ~0.05–0.20) while a real drum hit registers much louder (peak ~0.4–1.0). If the
-loudest onset is both later than `first_audible` and has peak > 0.10, the engine advances
-`first_audible` to that onset.
-
-The PCM is then shifted backward by `first_audible` frames (`memmove`), and
-`recorded_offset_in_bar` is advanced by the same amount so playback timing stays correct.
-
-#### 2. Trailing-onset trim
-
-The engine scans the full (already leading-trimmed) recording for onsets with the same
-`kOnsetThreshold`/`kMinSilenceBetweenOnsets` parameters. It counts all onsets and records
-the position of the last one (`last_onset_pos`).
-
-Trim fires only if:
-- `onset_count >= 2` (at least two rhythmic events exist — avoids cutting off single-hit samples)
-- `last_onset_pos > recorded_length_frames / 2` (the last onset is in the latter half)
-
-When trim fires, `recorded_length_frames` is set to `last_onset_pos`. The intent: the final
-onset (typically the button/key the user pressed to stop) is the musical downbeat for the
-next iteration, so the loop ends just before it — the wrap from end to start IS the downbeat,
-preventing a doubled hit at the loop boundary.
-
-#### 3. Edge fades
+#### 2. Edge fades
 
 ```cpp
 constexpr Frames kFadeBase = 96;  // 2 ms at 48 kHz
@@ -113,14 +106,21 @@ A linear ramp-up is applied to the first `fade_len` frames and a ramp-down to th
 `fade_len` frames. This eliminates click/pop at playback start and at the loop-wrap
 boundary. Capped to 25% of the recording so short samples are not dominated by the fades.
 
+#### 3. Shrink + envelope
+
+The PCM vector is shrunk from the 60 s preallocation (~23 MB) to the actual recorded
+length, and a `kEnvBins`-bin (32) peak envelope is computed for the UI waveform
+thumbnail (`Sample::compute_env`). Both are one-off RT-thread allocations in the same
+accepted class as the trims.
+
 #### 4. Master bar / play-head init
 
 If this is the first recording (`master_bar_frames == 0`), the engine:
 - Marks the sample as `is_master_loop = true`
-- Sets `master_bar_frames = recorded_length_frames` (after trims)
+- Sets `master_bar_frames = recorded_length_frames`
 - Resizes the rolling buffer to match `L`
-- Fast-forwards `global_play_head` by `round_trip_latency_frames + extra_latency_frames`
-  modulo `L` (see Latency Compensation below)
+- Resets `global_play_head` to 0 — the stop press IS the loop boundary, so playback
+  begins immediately at the top of the loop
 
 If the recording is too short (< `kMinRecordingMs` = 200 ms), it is silently discarded.
 
@@ -135,20 +135,23 @@ int input_frames  = device_.capture.internalPeriodSizeInFrames
                   * device_.capture.internalPeriods;
 int output_frames = device_.playback.internalPeriodSizeInFrames
                   * device_.playback.internalPeriods;
-int round_trip = input_frames + output_frames;
+int round_trip = input_frames + output_frames + device_extra;  // device_extra: see below
 engine.set_round_trip_latency_frames(round_trip);
 ```
 
-Typical values on a Mac with `periodSizeInFrames=128, periods=2`:
-input = 256 frames, output = 256 frames, round_trip = 512 frames (~10.7 ms at 48 kHz).
-The actual measured value is printed to stderr on startup.
+On macOS the CoreAudio device latency + safety offset for both directions is added on
+top (`coreaudio_device_latency_frames` in `audio_io_miniaudio.cpp`) — the ADC/DAC and
+driver add several ms that the buffer sizes alone miss. The actual measured value is
+printed to stderr on startup.
 
 ### User-tunable extra latency
 
-`extra_latency_frames` (default 2400 = 50 ms at 48 kHz) accounts for the residual
-hardware/speaker/air latency that miniaudio cannot measure. The user adjusts this live
-with the ±2 ms buttons in BottomBar. The value is signed; negative values advance
-recordings earlier in the bar.
+`extra_latency_frames` (default 0) is a by-ear knob for residual latency (speaker/air
+acoustics) that can't be measured — the `round_trip` compensation covers the measured
+chain: miniaudio buffer sizes plus, on macOS, the CoreAudio device latency + safety
+offsets for both directions. The user adjusts it live with the ±2 ms buttons in
+BottomBar. The value is signed; positive plays non-master samples EARLIER in the bar
+(compensates lag), negative later.
 
 ### Where each component is applied
 
@@ -159,29 +162,33 @@ recorded_offset_in_bar = (play_head + L - round_trip_latency % L) % L
 This shifts the recording's grid position backward by the round-trip latency so playback
 lands in phase with what the user heard.
 
-**At mix time** (non-master samples only, in `mixer.cpp`):
+**At mix time** (in `mixer.cpp`):
 ```cpp
-int64_t shifted = int64_t(offset) - int64_t(extra_latency_frames);
+int64_t shifted = int64_t(offset);
+if (!s.is_master_loop) shifted -= int64_t(extra_latency_frames);
 offset = Frames(((shifted % L) + L) % L);
 ```
 Applying `extra_latency` at mix time — rather than baking it into `recorded_offset_in_bar`
 at record time — means the user can dial the LAT knob live and all existing recordings
-shift together without re-recording.
+shift together without re-recording. The result is always normalised into
+`[0, bar_frames)` because `SetMasterBarFrames` can shrink the bar below a previously
+recorded offset.
 
-**At master StopRecording** (first loop only):
-```cpp
-int shift = round_trip_latency_frames + extra_latency_frames;
-global_play_head = Frames(shift % int(state.master_bar_frames));
-```
-Fast-forwarding the play head means the first audible downbeat of the master loop is heard
-one full bar after the stop gesture, aligned with the user's musical expectation, rather
-than `round_trip` ms after the click.
+**At master StopRecording** (first loop only): `global_play_head` resets to 0 — the
+master loop plays back immediately from its start. No latency shift is applied to the
+master; the LAT knob shifts every non-master sample against it.
 
 ## Mixer (`engine/src/mixer.cpp`)
 
 `mix(samples, banks, bar_frames, play_head, frame_count, out, extra_latency_frames)`
 is called once per audio callback after commands are applied. The output buffer is
 pre-zeroed by the caller.
+
+`play_head` is the engine's UNWRAPPED `uint64_t` total-frame counter (frames since the
+master timeline started) — the mixer derives the bar position (`% bar_frames`) and the
+multi-bar iteration position (`% loop_len`) from it. It must not be pre-wrapped to the
+bar: an earlier version wrapped it mod `bar_frames` each callback, which made every
+multi-bar sample repeat its first bar forever.
 
 ### Solo / mute logic
 
@@ -197,34 +204,44 @@ When `bank.mode == OneShot` and `s.playing == true`, the sample plays from
 
 ### LOOP samples — three branches
 
-After computing `offset` (with the LAT shift for non-master samples), the mixer chooses
-a branch based on `s.repeat` and `sample_len` vs `bar_frames`:
+After computing `offset` (normalised, with the LAT shift for non-master samples), the
+mixer computes the sample's effective play length in OUTPUT frames:
+
+```cpp
+Frames play_len = Frames(float(sample_len) / speed_ratio(s.speed));
+```
+
+At 2× speed a sample finishes in half its recorded length; at ½× it takes double.
+All three branches size their playback window from `play_len`, and all three map an
+output-frame position to a PCM read position through the shared helper:
+
+```cpp
+// pcm_position(local, speed, start_offset, sample_len):
+pos = positive_mod(local * speed + start_offset, sample_len)
+```
+
+so `start_offset_frames` rotates within the PCM consistently everywhere.
+
+Branch choice is based on `s.repeat` and `sample_len` vs `bar_frames`:
 
 #### Branch 1: Repeat
 
-```cpp
-float effective_play_len = sample_len / speed_ratio(s.speed);
-Frames tile_len = min(effective_play_len, bar_frames);
-```
-
-The sample tiles continuously across the bar starting from `offset`. Speed-aware:
-at 2× speed `effective_play_len` is halved, so the sample tiles twice per bar.
-At ½ speed it may overflow the bar — in that case `tile_len` is clamped to `bar_frames`.
-
-`start_offset_frames` rotates within `tile_len` using modular arithmetic so the
-rotation wraps cleanly.
+`tile_len = min(play_len, bar_frames)`. The sample tiles continuously across the bar
+starting from `offset` — at 2× speed it tiles twice per bar; at ½ speed the tile is
+clamped to the bar.
 
 #### Branch 2: Sub-bar non-repeat (`sample_len <= bar_frames`)
 
-The sample plays once per bar in the window `[offset, offset + sample_len)` with wrap
-handling when the window straddles the bar boundary. `start_offset_frames` rotates
-within `recorded_length_frames`.
+The sample plays once per bar in the window `[offset, offset + min(play_len, bar_frames))`
+with wrap handling when the window straddles the bar boundary.
 
 #### Branch 3: Multi-bar non-repeat (`sample_len > bar_frames`)
 
-`loop_len = nearest_multiple_of_L(sample_len, bar_frames)` (minimum 2L). The
-`global_play_head` is used modulo `loop_len`; frames past `sample_len` (trailing padding
-within the iteration) are silent.
+`loop_len = nearest_multiple_of_L(play_len, bar_frames)` (minimum 2L when `play_len > L`).
+The `global_play_head` is used modulo `loop_len`, and content is anchored at
+`recorded_start_total % loop_len` (minus the LAT shift for non-master samples) — the
+overdub plays back at the exact grid position it was performed at. Output frames past
+`play_len` (trailing padding within the iteration) are silent.
 
 ### Linear interpolation read
 
@@ -262,9 +279,35 @@ bpm = beats_per_bar * 60.0 / (master_bar_frames / sample_rate)
 in BottomBar work in reverse: they compute a new `master_bar_frames` from the target BPM
 and submit `SetMasterBarFrames`.
 
+## Metronome
+
+`SetMetronome(bvalue)` toggles a click on every beat of the master bar (only while
+`master_playing` and a bar exists). The click is a short sine burst with exponential
+decay (~30 ms), synthesised in `process()` after the mix — 1600 Hz on the downbeat,
+1050 Hz on other beats. No allocation; three scalar members hold the synth state.
+
+## Input peak
+
+Every callback updates `state.input_peak = max(buffer_peak, input_peak * 0.85)` — a
+decaying peak of the mic input the UI shows as a level dot (and which surfaces a
+denied-microphone-permission situation: the dot never lights up).
+
+## Export
+
+`AudioEngine::export_session(dir)` writes every sample as a float32 WAV
+(`sample-<id>-bank<N>.wav`, via `engine/src/wav_writer.cpp`) plus a `session.json`
+containing bar length, beats/bpm, extra latency, and per-sample metadata (bank, offset,
+length, volume, speed, reverse, repeat, start offset, master flag). Returns the number
+of files written.
+
+PRECONDITION: audio I/O must be stopped — the function walks RT-thread-owned sample
+data from the calling thread. `bridge.cpp::nativeExport` handles this: it stops the
+miniaudio device, exports, then restarts it (a sub-second audible gap). The UI's SAVE
+button exports to `~/Music/TapLooper/<timestamp>/`.
+
 ## Command set
 
-All 21 commands are defined in `engine/src/commands.h`. Integer ordinal = the value
+All 23 commands are defined in `engine/src/commands.h`. Integer ordinal = the value
 transmitted over JNI (see `shared/…/bridge/CommandType.kt` for the Kotlin constants).
 
 | Ordinal | Name | Parameters used |
@@ -290,6 +333,8 @@ transmitted over JNI (see `shared/…/bridge/CommandType.kt` for the Kotlin cons
 | 18 | `SetMasterBarFrames` | `ivalue` (frames; clamped 100 ms – 60 s) |
 | 19 | `SetSampleRepeat` | `sample_id`, `bvalue` |
 | 20 | `SetExtraLatencyFrames` | `ivalue` (frames, signed) |
+| 21 | `CancelRecording` | — |
+| 22 | `SetMetronome` | `bvalue` |
 
 ## Threading invariants
 
@@ -299,10 +344,16 @@ The RT audio thread (miniaudio callback) must never:
 - Make system calls
 
 The `CommandQueue<256>` is a single-producer / single-consumer lock-free ring buffer
-(power-of-two, atomic head/tail). The `StatePublisher` uses a mutex only briefly at the
-end of `process()` to swap a `shared_ptr` — the RT thread holds it for nanoseconds.
+(power-of-two, atomic head/tail). The `StatePublisher` uses a mutex only briefly to
+swap a `shared_ptr` — the RT thread holds it for nanoseconds. State is published
+immediately when commands were applied or a recording is active, otherwise every
+`kPublishEveryN` (8) callbacks — the UI polls at ~33 ms, so per-callback publishing
+would be wasted copies. The mixer input list is a member vector reused across
+callbacks (no steady-state allocation).
 
 **Known MVP exceptions** (acceptable; infrequent one-off events):
-- First `StopRecording` reallocates the rolling buffer to match `master_bar_frames`.
+- `StopRecording` shrinks the sample's PCM vector to its recorded length and, for the
+  first recording, reallocates the rolling buffer to match `master_bar_frames`.
 - `CaptureLastLoop` allocates a new `Sample` and a temporary `std::vector<float>`.
 - `Reset` calls `samples.clear()` which destructs `unique_ptr`s (heap frees on RT thread).
+- `publish_state` does one `make_shared<EngineState>` copy per publish (see cadence above).

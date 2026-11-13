@@ -21,6 +21,7 @@ struct SampleState {
     Frames recorded_offset_in_bar;
     int32_t start_offset_frames;
     bool repeat;
+    float env[kEnvBins];   // waveform envelope (peak per bin) for the UI thumbnail
 };
 
 struct BankState {
@@ -44,6 +45,8 @@ struct EngineState {
     float bpm;
     bool master_playing;
     int32_t extra_latency_frames;
+    float input_peak;      // decaying peak of mic input (0..1), for the UI level meter
+    bool metronome;
     uint64_t version;
 };
 

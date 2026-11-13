@@ -2,29 +2,42 @@ package com.taplooper.ui
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.unit.IntSize
 import com.taplooper.domain.AppViewModel
 import com.taplooper.ui.components.*
 import com.taplooper.ui.theme.LocalTLTheme
 import com.taplooper.ui.theme.TLTheme
 import kotlin.math.abs
+import kotlinx.coroutines.delay
 
 @Composable
 fun TapLooperScreen(vm: AppViewModel) {
     val state by vm.state.collectAsState()
     var page by remember { mutableIntStateOf(0) }
     var modalSampleId by remember { mutableStateOf<Long?>(null) }
-    var screenSize by remember { mutableStateOf(IntSize.Zero) }
+    // Each bank body's screen rect (reported by Bank) — used to map drag drops
+    // to the exact bank + position instead of approximate screen quadrants.
+    val bankBodyRects = remember { mutableStateMapOf<Int, Rect>() }
+
+    // Flash "SAVED" in the TopBar for a moment after each export
+    val exportDir by vm.lastExportDir.collectAsState()
+    var showSaved by remember { mutableStateOf(false) }
+    LaunchedEffect(exportDir) {
+        if (exportDir != null) {
+            showSaved = true
+            delay(2500)
+            showSaved = false
+        }
+    }
 
     val pulseHz = if (state.bpm > 0) state.bpm / 60f else 1f
     val durationMs = ((1000f / pulseHz).coerceAtLeast(150f)).toInt()
@@ -41,10 +54,14 @@ fun TapLooperScreen(vm: AppViewModel) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .onGloballyPositioned { screenSize = it.size }
                     .pointerInput(state.recording) {
                         if (state.recording) {
-                            detectTapGestures { vm.stopRecording() }
+                            // Stop on press-DOWN, not tap-up: recording starts on
+                            // down, so the loop span must end on down too.
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                vm.stopRecording()
+                            }
                         }
                     }
                     .pointerInput(state.recording, page) {
@@ -64,7 +81,10 @@ fun TapLooperScreen(vm: AppViewModel) {
                         recordingDurationMs = state.recordingDurationFrames * 1000 / 48000,
                         currentPage = page,
                         masterPlaying = state.masterPlaying,
+                        inputPeak = state.inputPeak,
+                        showSaved = showSaved,
                         onCapture = { vm.captureLastLoop(state.focusedBank) },
+                        onSave = { vm.exportSession() },
                         onReset = { vm.reset() },
                         onTogglePlay = { vm.setMasterPlaying(!state.masterPlaying) },
                         onPageTap = { p -> if (!state.recording) page = p },
@@ -94,13 +114,28 @@ fun TapLooperScreen(vm: AppViewModel) {
                                 onToggleSolo = { vm.setBankSolo(bankId, !state.banks[bankId].soloed) },
                                 onSampleTap = { s -> vm.tapSample(s.id) },
                                 onSampleLongPress = { s -> modalSampleId = s.id },
-                                onSampleDragStart = { _ -> },
-                                onSampleDragMove = { _, _ -> },
-                                onSampleDragEnd = { s, off ->
-                                    val target = bankIdAtOffset(off, screenSize, page)
-                                    val (nx, ny) = localizeToBank(off, screenSize, target)
-                                    vm.moveSample(s.id, target, nx, ny)
+                                // A horizontal swipe that started on empty bank space kicked
+                                // off a recording on press-down — discard it and page instead.
+                                onSwipe = { dir ->
+                                    vm.cancelRecording()
+                                    page = (page + dir).coerceIn(0, 1)
                                 },
+                                onSampleDragEnd = { s, off ->
+                                    val pageBanks = (page * 4) until (page * 4 + 4)
+                                    val target = pageBanks.firstOrNull {
+                                        bankBodyRects[it]?.contains(off) == true
+                                    } ?: pageBanks.minByOrNull {
+                                        val c = bankBodyRects[it]?.center
+                                        if (c == null) Float.MAX_VALUE
+                                        else (off.x - c.x) * (off.x - c.x) + (off.y - c.y) * (off.y - c.y)
+                                    } ?: s.bank
+                                    bankBodyRects[target]?.let { r ->
+                                        val nx = ((off.x - r.left) / r.width).coerceIn(0f, 1f)
+                                        val ny = ((off.y - r.top) / r.height).coerceIn(0f, 1f)
+                                        vm.moveSample(s.id, target, nx, ny)
+                                    }
+                                },
+                                onBodyRect = { r -> bankBodyRects[bankId] = r },
                                 onVolumeChange = { v -> vm.setBankVolume(bankId, v) },
                             )
                         }
@@ -110,9 +145,11 @@ fun TapLooperScreen(vm: AppViewModel) {
                         beatsPerBar = state.beatsPerBar,
                         masterBarFrames = state.masterBarFrames,
                         extraLatencyFrames = state.extraLatencyFrames,
+                        metronome = state.metronome,
                         onChangeBeats = { v -> vm.setBeatsPerBar(v) },
                         onChangeMasterBarFrames = { v -> vm.setMasterBarFrames(v) },
                         onChangeExtraLatency = { v -> vm.setExtraLatencyFrames(v) },
+                        onToggleMetronome = { vm.setMetronome(!state.metronome) },
                     )
                 }
             }
@@ -145,17 +182,3 @@ fun TapLooperScreen(vm: AppViewModel) {
     }
 }
 
-private fun bankIdAtOffset(o: Offset, screen: IntSize, page: Int): Int {
-    val col = if (o.x < screen.width / 2f) 0 else 1
-    val row = if (o.y < screen.height / 2f) 0 else 1
-    return page * 4 + row * 2 + col
-}
-private fun localizeToBank(o: Offset, screen: IntSize, bankId: Int): Pair<Float, Float> {
-    val col = (bankId % 4) % 2
-    val row = ((bankId % 4) / 2)
-    val w = screen.width / 2f
-    val h = screen.height / 2f
-    val x = (o.x - col * w) / w
-    val y = (o.y - row * h) / h
-    return x.coerceIn(0f, 1f) to y.coerceIn(0f, 1f)
-}

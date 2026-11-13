@@ -4,14 +4,45 @@
 #include "sample.h"
 #include "bpm.h"
 #include "mixer.h"
+#include "wav_writer.h"
 #include <memory>
+#include <string>
 #include <vector>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <cstdio>
+#include <sys/stat.h>
 
 namespace tl {
+
+namespace {
+// The UI polls at ~33 ms; publishing every callback (~2.7 ms at 128 frames)
+// would be ~12x wasted state copies + a make_shared on the RT thread. State
+// is published immediately when commands were applied or a recording is
+// active, otherwise every Nth callback.
+constexpr int kPublishEveryN = 8;
+
+void mirror_sample(const Sample& s, SampleState& ss) {
+    ss.id = s.id; ss.bank = s.bank;
+    ss.volume = s.volume; ss.reverse = s.reverse; ss.speed = s.speed;
+    ss.enabled = s.enabled; ss.playing = s.playing; ss.recording = s.recording;
+    ss.position_x = s.position_x; ss.position_y = s.position_y;
+    ss.recorded_length_frames = s.recorded_length_frames;
+    ss.recorded_offset_in_bar = s.recorded_offset_in_bar;
+    ss.start_offset_frames = s.start_offset_frames;
+    ss.repeat = s.repeat;
+    for (int i = 0; i < kEnvBins; ++i) ss.env[i] = s.env[i];
+}
+
+// mkdir -p equivalent (POSIX; macOS/Linux/Android).
+void mkpath(const std::string& dir) {
+    for (size_t i = 1; i < dir.size(); ++i) {
+        if (dir[i] == '/') ::mkdir(dir.substr(0, i).c_str(), 0755);
+    }
+    ::mkdir(dir.c_str(), 0755);
+}
+} // namespace
 
 struct AudioEngine::Impl {
     StatePublisher publisher;
@@ -22,16 +53,32 @@ struct AudioEngine::Impl {
     std::unique_ptr<Sample> active_recording;
     SampleId next_id{1};
     int sample_rate{kSampleRate};
-    Frames global_play_head{0};   // wraps modulo master_bar_frames once set
+    // Unwrapped total frames since the master timeline started. Never wrapped
+    // to the bar: multi-bar samples need a position spanning their full loop
+    // length (wrapping mod L made them repeat their first bar forever).
+    uint64_t global_play_head{0};
     int round_trip_latency_frames{0};
-    int extra_latency_frames{2400};  // 50ms default at 48kHz — typical built-in Mac audio
+    int extra_latency_frames{0};  // by-ear LAT knob; round_trip already compensates measured latency
 
-    Impl() { init_default_state(state); publisher.publish(state); }
+    std::vector<Sample*> mix_scratch; // reused every callback; no RT allocation
+    int publish_tick{0};
+
+    // Metronome click synth (sine burst with exponential decay)
+    double click_phase{0.0};
+    float click_env{0.f};
+    float click_freq{1000.f};
+
+    Impl() {
+        mix_scratch.reserve(kMaxSamples);
+        init_default_state(state);
+        publisher.publish(state);
+    }
 
     void apply(const Command& c) {
         switch (c.type) {
         case CommandType::StartRecording: {
             if (active_recording) return; // already recording, ignore
+            if (samples.size() >= size_t(kMaxSamples)) return; // grid full; UI can't show more
             active_recording = std::make_unique<Sample>(
                 next_id++, c.bank, kMaxRecFrames, kChannels);
             active_recording->position_x = c.fx;
@@ -41,163 +88,62 @@ struct AudioEngine::Impl {
             if (state.master_bar_frames > 0) {
                 // Compensate for round-trip latency: the audio the user hears now
                 // was emitted ~output_latency ago, and their played notes arrive at
-                // the engine ~input_latency late. Shifting the offset backward by
+                // the engine ~input_latency late. Shifting the start backward by
                 // round_trip_latency makes the playback land in sync with the loop.
-                // extra_latency_frames is a user-tunable ±offset for fine alignment.
-                Frames latency = Frames(round_trip_latency_frames);
-                Frames L = state.master_bar_frames;
-                Frames adjusted = (global_play_head + L - (latency % L)) % L;
-                active_recording->recorded_offset_in_bar = adjusted;
+                // extra_latency_frames is a user-tunable ±offset applied at mix time.
+                int64_t start = int64_t(global_play_head) - int64_t(round_trip_latency_frames);
+                active_recording->recorded_start_total = start;
+                int64_t L = int64_t(state.master_bar_frames);
+                active_recording->recorded_offset_in_bar = Frames(((start % L) + L) % L);
             }
             state.recording = true;
             state.recording_sample_id = active_recording->id;
+            state.focused_bank = c.bank;   // CAPTURE targets the last-touched bank
             break;
         }
         case CommandType::StopRecording: {
             if (!active_recording) return;
             active_recording->recording = false;
 
-            // ── Trim leading silence ────────────────────────────────────────
-            // Find the loudest onset in the first 500ms and trim to it.
-            // A trackpad/mouse click registers as a quieter transient (≈0.05–0.20)
-            // than a drum hit (≈0.4–1.0). By picking the loudest onset instead of
-            // the first audible frame, we skip the click and land on the real audio.
-            constexpr float kSilenceThreshold = 0.02f;  // ~-34 dB
-            constexpr float kOnsetThreshold = 0.05f;
-            constexpr Frames kMinSilenceBetween = 480;        // 10ms at 48kHz
-            constexpr Frames kClickScanFrames = 24000;        // first 500ms only
-
+            // The loop is exactly the span the user bounded: it starts when the
+            // box is created (press-down) and ends at the stop press. No content
+            // trimming — leading silence is performance space, and the old
+            // leading/trailing onset trims moved the loop boundaries away from
+            // the user's gestures.
             Sample& rec = *active_recording;
-            Frames first_audible = 0;
-            bool found_audible = false;
-            {
-                // Step A: find the very first audible frame at low threshold.
-                for (Frames f = 0; f < rec.recorded_length_frames; ++f) {
-                    bool audible = false;
-                    for (int ch = 0; ch < rec.channels; ++ch) {
-                        if (std::abs(rec.pcm[f * rec.channels + ch]) > kSilenceThreshold) {
-                            audible = true; break;
-                        }
-                    }
-                    if (audible) { first_audible = f; found_audible = true; break; }
-                }
 
-                // Step B: within the first 500ms, find ALL onsets and pick the loudest.
-                if (found_audible) {
-                    Frames scan_end = std::min<Frames>(rec.recorded_length_frames, kClickScanFrames);
-                    Frames loudest_onset = first_audible;
-                    float loudest_peak = 0.f;
-
-                    Frames cur_onset_start = 0;
-                    float cur_peak = 0.f;
-                    bool in_onset = false;
-                    Frames silence_run = kMinSilenceBetween;  // start as if already silent
-
-                    for (Frames f = first_audible; f < scan_end; ++f) {
-                        float amp = 0.f;
+            // ── Quantize loop length to the bar grid ────────────────────────
+            // A take longer than one bar plays back in whole-bar cycles, so a
+            // 3.9-bar recording would wrap mid-phrase (or leave a silence gap)
+            // at the seam. Snap the length to the nearest whole bar: truncate
+            // the overhang, or pad the tail with silence (never restore
+            // trimmed audio — that would bring the stop-click back).
+            if (state.master_bar_frames > 0 &&
+                rec.recorded_length_frames > state.master_bar_frames) {
+                Frames L = state.master_bar_frames;
+                Frames bars = (rec.recorded_length_frames + L / 2) / L;
+                Frames target = bars * L;
+                if (target > rec.capacity_frames) target = rec.capacity_frames;
+                if (target > rec.recorded_length_frames) {
+                    // Fade the real-content edge before padding so the
+                    // audio→silence junction inside the loop doesn't click.
+                    Frames fl = std::min<Frames>(96, rec.recorded_length_frames / 4);
+                    for (Frames f = 0; f < fl; ++f) {
+                        float gain = float(f + 1) / float(fl + 1);
+                        Frames pos = rec.recorded_length_frames - 1 - f;
                         for (int ch = 0; ch < rec.channels; ++ch) {
-                            float v = std::abs(rec.pcm[f * rec.channels + ch]);
-                            if (v > amp) amp = v;
-                        }
-                        bool above = amp > kOnsetThreshold;
-                        if (above) {
-                            if (!in_onset && silence_run >= kMinSilenceBetween) {
-                                in_onset = true;
-                                cur_onset_start = f;
-                                cur_peak = amp;
-                            } else if (in_onset && amp > cur_peak) {
-                                cur_peak = amp;
-                            }
-                            silence_run = 0;
-                        } else {
-                            if (in_onset) {
-                                if (cur_peak > loudest_peak) {
-                                    loudest_peak = cur_peak;
-                                    loudest_onset = cur_onset_start;
-                                }
-                                in_onset = false;
-                            }
-                            ++silence_run;
+                            rec.pcm[pos * rec.channels + ch] *= gain;
                         }
                     }
-                    if (in_onset && cur_peak > loudest_peak) {
-                        loudest_peak = cur_peak;
-                        loudest_onset = cur_onset_start;
-                    }
-
-                    // Prefer the loudest onset if it is significantly later than
-                    // the first audible point AND notably loud (real audio, not click).
-                    if (loudest_onset > first_audible && loudest_peak > 0.10f) {
-                        std::fprintf(stderr,
-                            "[engine] loudest-onset trim: first_audible=%u, loudest_onset=%u, peak=%.3f\n",
-                            (unsigned)first_audible, (unsigned)loudest_onset, loudest_peak);
-                        first_audible = loudest_onset;
-                    }
-                }
-            }
-            if (found_audible && first_audible > 0 && first_audible < rec.recorded_length_frames) {
-                // Shift PCM backward by first_audible frames.
-                Frames new_len = rec.recorded_length_frames - first_audible;
-                std::memmove(rec.pcm.data(),
-                             rec.pcm.data() + first_audible * rec.channels,
-                             new_len * rec.channels * sizeof(float));
-                Frames pre_trim_len = rec.recorded_length_frames;
-                rec.recorded_length_frames = new_len;
-                // Also shift the recorded_offset_in_bar forward by the trimmed amount.
-                // (The recording effectively started later than the user clicked.)
-                if (state.master_bar_frames > 0) {
-                    rec.recorded_offset_in_bar =
-                        (rec.recorded_offset_in_bar + first_audible) % state.master_bar_frames;
+                    std::memset(rec.pcm.data() + size_t(rec.recorded_length_frames) * rec.channels,
+                                0,
+                                size_t(target - rec.recorded_length_frames) * rec.channels * sizeof(float));
                 }
                 std::fprintf(stderr,
-                    "[engine] leading trim: first_audible=%u, was_len=%u, new_len=%u\n",
-                    (unsigned)first_audible,
-                    (unsigned)pre_trim_len,
-                    (unsigned)rec.recorded_length_frames);
-            }
-            // ────────────────────────────────────────────────────────────────
-
-            // ── Trim trailing onset ─────────────────────────────────────────
-            // Scan the recording forward for onsets (rising edges above threshold
-            // after sufficient silence). The "last onset" is the final attack the
-            // user played (typically the kick they used to signal stop). Trim the
-            // recording to end at that onset, so when looped, the wrap from end to
-            // start IS the rhythmic downbeat — no doubled-up "1" kick at the boundary.
-            // (kOnsetThreshold declared above in leading-trim section; 0.05f / ~-26 dB)
-            constexpr Frames kMinSilenceBetweenOnsets = 480;  // 10 ms at 48 kHz
-
-            Frames last_onset_pos = 0;
-            int    onset_count    = 0;
-            Frames silence_run    = kMinSilenceBetweenOnsets;  // first audible counts as an onset
-
-            for (Frames f = 0; f < rec.recorded_length_frames; ++f) {
-                float amp = 0.f;
-                for (int ch = 0; ch < rec.channels; ++ch) {
-                    float v = std::abs(rec.pcm[f * rec.channels + ch]);
-                    if (v > amp) amp = v;
-                }
-                if (amp > kOnsetThreshold) {
-                    if (silence_run >= kMinSilenceBetweenOnsets) {
-                        last_onset_pos = f;
-                        ++onset_count;
-                    }
-                    silence_run = 0;
-                } else {
-                    ++silence_run;
-                }
-            }
-
-            // Only trim if we found a rhythmic pattern (>= 2 onsets) and the last
-            // onset is in the latter half of the recording (avoids cutting off most
-            // of a long sustained recording).
-            if (onset_count >= 2 && last_onset_pos > rec.recorded_length_frames / 2) {
-                std::fprintf(stderr,
-                    "[engine] trailing trim: onsets=%d, last_onset=%u, was_len=%u, new_len=%u\n",
-                    onset_count,
-                    (unsigned)last_onset_pos,
-                    (unsigned)rec.recorded_length_frames,
-                    (unsigned)last_onset_pos);
-                rec.recorded_length_frames = last_onset_pos;
+                    "[engine] bar quantize: len=%u -> %u (%u bars of %u)\n",
+                    (unsigned)rec.recorded_length_frames, (unsigned)target,
+                    (unsigned)bars, (unsigned)L);
+                rec.recorded_length_frames = target;
             }
             // ────────────────────────────────────────────────────────────────
 
@@ -235,20 +181,22 @@ struct AudioEngine::Impl {
                 state.recording_sample_id = 0;
                 break;
             }
+
+            // Free the unused tail of the 60 s preallocation (23 MB per sample
+            // otherwise). One-off allocation on the RT thread — same accepted
+            // class as the trims above.
+            rec.pcm.resize(size_t(rec.recorded_length_frames) * size_t(rec.channels));
+            rec.pcm.shrink_to_fit();
+            rec.capacity_frames = rec.recorded_length_frames;
+            rec.compute_env();
+
             if (state.master_bar_frames == 0) {
                 active_recording->is_master_loop = true;
                 state.master_bar_frames = len;
                 rolling = RollingBuffer(state.master_bar_frames, kChannels);
-                // Shift play_head forward by round_trip + extra_latency so the
-                // loop's audible rhythm aligns with what the user expects. The
-                // hardware delay is unavoidable, but rather than hearing the
-                // loop's "1" round_trip ms after the click (which lags behind
-                // the user's groove), we fast-forward into the loop so sample[0]
-                // (the first attack) is heard at T_stop + L — exactly when the
-                // next downbeat is expected musically.
-                int shift = round_trip_latency_frames + extra_latency_frames;
-                if (shift < 0) shift = 0;
-                global_play_head = Frames(shift % int(state.master_bar_frames));
+                // The stop press IS the loop boundary: playback begins
+                // immediately at the top of the loop.
+                global_play_head = 0;
             }
             // For a LOOP-mode bank, mark enabled so it starts playing.
             BankMode m = state.banks[active_recording->bank].mode;
@@ -336,15 +284,18 @@ struct AudioEngine::Impl {
         }
         case CommandType::CaptureLastLoop: {
             if (state.master_bar_frames == 0) break; // no L yet
+            if (samples.size() >= size_t(kMaxSamples)) break; // grid full
             Frames len = state.master_bar_frames;
-            auto sample = std::make_unique<Sample>(next_id++, c.bank, kMaxRecFrames, kChannels);
+            auto sample = std::make_unique<Sample>(next_id++, c.bank, len, kChannels);
             sample->position_x = 0.5f; sample->position_y = 0.5f;
-            sample->recorded_offset_in_bar = global_play_head;
+            sample->recorded_start_total = int64_t(global_play_head) - int64_t(len);
+            sample->recorded_offset_in_bar = Frames(global_play_head % uint64_t(len));
             sample->recording = true;
             std::vector<float> buf(size_t(len) * kChannels);
             rolling.read_last(buf.data(), len);
             sample->append(buf.data(), len);
             sample->recording = false;
+            sample->compute_env();
             if (state.banks[c.bank].mode == BankMode::Loop) sample->enabled = true;
             samples.push_back(std::move(sample));
             state.sample_count = int(samples.size());
@@ -385,55 +336,52 @@ struct AudioEngine::Impl {
             if (new_L > max_L) new_L = max_L;
             state.master_bar_frames = new_L;
             rolling = RollingBuffer(new_L, kChannels);
-            // Wrap global_play_head into the new range
-            global_play_head = global_play_head % new_L;
+            // Rebase the timeline into the new bar
+            global_play_head = global_play_head % uint64_t(new_L);
             break;
         }
         case CommandType::SetExtraLatencyFrames:
             extra_latency_frames = c.ivalue;
             state.extra_latency_frames = c.ivalue;
             break;
+        case CommandType::CancelRecording: {
+            if (!active_recording) break;
+            active_recording.reset();
+            state.recording = false;
+            state.recording_duration_frames = 0;
+            state.recording_sample_id = 0;
+            break;
+        }
+        case CommandType::SetMetronome:
+            state.metronome = c.bvalue;
+            break;
         default: break; // other commands implemented in later tasks
         }
     }
 
     void publish_state() {
-        // Compute 'playing' indicator for each sample before mirroring to state
+        bool any_solo = false;
+        for (int i = 0; i < kNumBanks; ++i) {
+            if (state.banks[i].soloed) { any_solo = true; break; }
+        }
+        // LOOP samples: 'playing' tracks enabled; audibility (mute/solo) is
+        // applied at mirror time below. ONE-SHOT 'playing' is owned by the mixer.
         for (auto& up : samples) {
-            BankMode m = state.banks[up->bank].mode;
-            if (m == BankMode::Loop) {
-                up->playing = up->enabled && !state.banks[up->bank].muted;
-            } else {
-                // up->playing is already managed by mixer (set to false when one_shot finishes)
-            }
+            if (state.banks[up->bank].mode == BankMode::Loop) up->playing = up->enabled;
         }
 
         // mirror samples vector into state.samples
         int n = std::min(int(samples.size()), kMaxSamples);
         for (int i = 0; i < n; ++i) {
             const Sample& s = *samples[i];
-            SampleState& ss = state.samples[i];
-            ss.id = s.id; ss.bank = s.bank;
-            ss.volume = s.volume; ss.reverse = s.reverse; ss.speed = s.speed;
-            ss.enabled = s.enabled; ss.playing = s.playing; ss.recording = s.recording;
-            ss.position_x = s.position_x; ss.position_y = s.position_y;
-            ss.recorded_length_frames = s.recorded_length_frames;
-            ss.recorded_offset_in_bar = s.recorded_offset_in_bar;
-            ss.start_offset_frames = s.start_offset_frames;
-            ss.repeat = s.repeat;
+            mirror_sample(s, state.samples[i]);
+            const BankState& b = state.banks[s.bank];
+            bool audible = any_solo ? b.soloed : !b.muted;
+            state.samples[i].playing = s.playing && audible;
         }
         // Also mirror the active recording (if any) so the UI shows the box during recording
         if (active_recording && n < kMaxSamples) {
-            const Sample& s = *active_recording;
-            SampleState& ss = state.samples[n];
-            ss.id = s.id; ss.bank = s.bank;
-            ss.volume = s.volume; ss.reverse = s.reverse; ss.speed = s.speed;
-            ss.enabled = s.enabled; ss.playing = s.playing; ss.recording = s.recording;
-            ss.position_x = s.position_x; ss.position_y = s.position_y;
-            ss.recorded_length_frames = s.recorded_length_frames;
-            ss.recorded_offset_in_bar = s.recorded_offset_in_bar;
-            ss.start_offset_frames = s.start_offset_frames;
-            ss.repeat = s.repeat;
+            mirror_sample(*active_recording, state.samples[n]);
             n++;
         }
         state.sample_count = n;
@@ -450,35 +398,82 @@ AudioEngine::~AudioEngine() = default;
 void AudioEngine::process(const float* in, float* out, int frame_count) {
     // 1. Drain commands
     Command c{};
-    while (impl_->commands.pop(c)) impl_->apply(c);
+    bool did_apply = false;
+    while (impl_->commands.pop(c)) { impl_->apply(c); did_apply = true; }
 
-    // 2. Append input to rolling buffer
+    // 2. Track input peak (decaying) for the UI level meter
+    {
+        float peak = 0.f;
+        const int n = frame_count * kChannels;
+        for (int i = 0; i < n; ++i) {
+            float v = in[i] < 0.f ? -in[i] : in[i];
+            if (v > peak) peak = v;
+        }
+        impl_->state.input_peak = std::max(peak, impl_->state.input_peak * 0.85f);
+    }
+
+    // 3. Append input to rolling buffer
     impl_->rolling.write(in, Frames(frame_count));
 
-    // 3. Append input to active recording if any
+    // 4. Append input to active recording if any; finalize when the 60s cap
+    //    is hit instead of silently freezing the counter.
     if (impl_->active_recording) {
         impl_->active_recording->append(in, Frames(frame_count));
         impl_->state.recording_duration_frames = impl_->active_recording->recorded_length_frames;
+        if (impl_->active_recording->recorded_length_frames >= kMaxRecFrames) {
+            Command stop{}; stop.type = CommandType::StopRecording;
+            impl_->apply(stop);
+            did_apply = true;
+        }
     }
 
-    // 4. Zero output then mix (using current play_head)
+    // 5. Zero output then mix (using current play_head)
     std::memset(out, 0, sizeof(float) * size_t(frame_count) * kChannels);
     if (impl_->state.master_playing) {
-        std::vector<Sample*> ptrs;
-        ptrs.reserve(impl_->samples.size());
-        for (auto& up : impl_->samples) ptrs.push_back(up.get());
-        mix(ptrs, impl_->state.banks, impl_->state.master_bar_frames,
+        impl_->mix_scratch.clear();   // capacity persists — no RT allocation
+        for (auto& up : impl_->samples) impl_->mix_scratch.push_back(up.get());
+        mix(impl_->mix_scratch, impl_->state.banks, impl_->state.master_bar_frames,
             impl_->global_play_head, frame_count, out, impl_->extra_latency_frames);
     }
 
-    // 5. Advance global play head (AFTER mix)
-    if (impl_->state.master_bar_frames > 0) {
-        impl_->global_play_head =
-            (impl_->global_play_head + Frames(frame_count)) % impl_->state.master_bar_frames;
+    // 6. Metronome click on every beat of the master bar
+    if (impl_->state.metronome && impl_->state.master_playing &&
+        impl_->state.master_bar_frames > 0 && impl_->state.beats_per_bar > 0) {
+        Frames L = impl_->state.master_bar_frames;
+        Frames beat_len = L / Frames(impl_->state.beats_per_bar);
+        if (beat_len > 0) {
+            constexpr double kTwoPi = 6.283185307179586;
+            for (int i = 0; i < frame_count; ++i) {
+                Frames p = (impl_->global_play_head + Frames(i)) % L;
+                // Skip the ragged remainder when L doesn't divide evenly.
+                if (p % beat_len == 0 && p / beat_len < Frames(impl_->state.beats_per_bar)) {
+                    impl_->click_env = 0.4f;
+                    impl_->click_phase = 0.0;
+                    impl_->click_freq = (p == 0) ? 1600.f : 1050.f;  // downbeat higher
+                }
+                if (impl_->click_env > 0.0005f) {
+                    float v = float(std::sin(impl_->click_phase)) * impl_->click_env;
+                    impl_->click_phase += kTwoPi * double(impl_->click_freq) / double(impl_->sample_rate);
+                    impl_->click_env *= 0.995f;   // ~30ms decay
+                    out[i * kChannels + 0] += v;
+                    out[i * kChannels + 1] += v;
+                }
+            }
+        }
     }
 
-    // 6. Publish state
-    impl_->publish_state();
+    // 7. Advance global play head (AFTER mix). Unwrapped total — the mixer
+    //    takes positions mod bar_frames / loop_len itself.
+    if (impl_->state.master_bar_frames > 0) {
+        impl_->global_play_head += uint64_t(frame_count);
+    }
+
+    // 8. Publish state — immediately when commands ran or recording is active,
+    //    otherwise every kPublishEveryN callbacks (see constant above).
+    if (did_apply || impl_->active_recording || ++impl_->publish_tick >= kPublishEveryN) {
+        impl_->publish_tick = 0;
+        impl_->publish_state();
+    }
 }
 
 bool AudioEngine::submit(const Command& cmd) {
@@ -497,6 +492,58 @@ void AudioEngine::set_round_trip_latency_frames(int frames) {
 
 void AudioEngine::set_extra_latency_frames(int frames) {
     impl_->extra_latency_frames = frames;
+}
+
+int AudioEngine::export_session(const char* dir) {
+    // PRECONDITION: audio I/O stopped — walks RT-owned sample data directly.
+    std::string base(dir);
+    mkpath(base);
+    int written = 0;
+    for (const auto& up : impl_->samples) {
+        const Sample& s = *up;
+        if (s.recorded_length_frames == 0) continue;
+        char name[96];
+        std::snprintf(name, sizeof(name), "/sample-%llu-bank%d.wav",
+                      (unsigned long long)s.id, int(s.bank) + 1);
+        if (write_wav_f32((base + name).c_str(), s.pcm.data(),
+                          s.recorded_length_frames, s.channels, impl_->sample_rate)) {
+            ++written;
+        }
+    }
+    FILE* f = std::fopen((base + "/session.json").c_str(), "w");
+    if (f) {
+        const EngineState& st = impl_->state;
+        std::fprintf(f,
+            "{\n"
+            "  \"sample_rate\": %d,\n"
+            "  \"master_bar_frames\": %u,\n"
+            "  \"beats_per_bar\": %d,\n"
+            "  \"bpm\": %.2f,\n"
+            "  \"extra_latency_frames\": %d,\n"
+            "  \"samples\": [\n",
+            impl_->sample_rate, st.master_bar_frames, st.beats_per_bar,
+            derive_bpm(st.master_bar_frames, st.beats_per_bar, impl_->sample_rate),
+            impl_->extra_latency_frames);
+        for (size_t i = 0; i < impl_->samples.size(); ++i) {
+            const Sample& s = *impl_->samples[i];
+            std::fprintf(f,
+                "    {\"id\": %llu, \"bank\": %d, \"file\": \"sample-%llu-bank%d.wav\","
+                " \"offset_in_bar\": %u, \"length_frames\": %u, \"volume\": %.3f,"
+                " \"speed\": %d, \"reverse\": %s, \"repeat\": %s,"
+                " \"start_offset_frames\": %d, \"is_master\": %s}%s\n",
+                (unsigned long long)s.id, int(s.bank) + 1,
+                (unsigned long long)s.id, int(s.bank) + 1,
+                s.recorded_offset_in_bar, s.recorded_length_frames, s.volume,
+                int(s.speed), s.reverse ? "true" : "false", s.repeat ? "true" : "false",
+                s.start_offset_frames, s.is_master_loop ? "true" : "false",
+                (i + 1 < impl_->samples.size()) ? "," : "");
+        }
+        std::fprintf(f, "  ]\n}\n");
+        std::fclose(f);
+        ++written;
+    }
+    std::fprintf(stderr, "[engine] exported %d file(s) to %s\n", written, dir);
+    return written;
 }
 
 } // namespace tl

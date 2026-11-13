@@ -22,4 +22,6 @@ object CommandType {
     const val SetMasterBarFrames   = 18
     const val SetSampleRepeat      = 19
     const val SetExtraLatencyFrames = 20
+    const val CancelRecording      = 21
+    const val SetMetronome         = 22
 }

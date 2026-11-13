@@ -3,12 +3,13 @@ package com.taplooper.ui.gestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
+import kotlin.time.TimeSource
 
 fun Modifier.tapLongPressDrag(
     onTap: () -> Unit,
@@ -19,19 +20,18 @@ fun Modifier.tapLongPressDrag(
     enabled: Boolean,
     movementThresholdPx: Float = 12f,
     longPressDelayMs: Long = 500L,
-): Modifier = composed {
-    pointerInput(enabled) {
+): Modifier = pointerInput(enabled) {
         if (!enabled) return@pointerInput
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             down.consume()
-            val downTime = System.currentTimeMillis()
+            val downMark = TimeSource.Monotonic.markNow()
             var totalDelta = Offset.Zero
             var dragging = false
             var longPressed = false
 
             while (true) {
-                val elapsed = System.currentTimeMillis() - downTime
+                val elapsed = downMark.elapsedNow().inWholeMilliseconds
                 val remaining = (longPressDelayMs - elapsed).coerceAtLeast(0L)
 
                 val event = if (!longPressed && !dragging && remaining > 0) {
@@ -55,8 +55,13 @@ fun Modifier.tapLongPressDrag(
                 }
 
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                // Per-event delta (position - previousPosition): immune to the node
+                // itself moving with the drag, and to multiple events per frame —
+                // (position - down.position) double-counts in both cases.
+                // Must be read BEFORE consume(): positionChange() reports Zero on a
+                // consumed change.
+                totalDelta += change.positionChange()
                 change.consume()
-                totalDelta += change.position - down.position
                 val movedFar = abs(totalDelta.x) > movementThresholdPx || abs(totalDelta.y) > movementThresholdPx
 
                 if (!longPressed && !dragging && movedFar) {
@@ -76,4 +81,3 @@ fun Modifier.tapLongPressDrag(
             }
         }
     }
-}

@@ -24,6 +24,7 @@ set(TL_ENGINE_SOURCES
     src/rolling_buffer.cpp
     src/bpm.cpp
     src/mixer.cpp
+    src/wav_writer.cpp
     src/audio_engine.cpp
 )
 

@@ -15,13 +15,17 @@ class EngineBridge {
         ivalue: Int = 0, bvalue: Boolean = false
     ): Boolean = nativeSubmit(handle, type, sampleId, bank, fx, fy, fvalue, ivalue, bvalue)
 
+    fun export(dir: String): Int = nativeExport(handle, dir)
+
+    // Layout must stay in sync with bridge.cpp::nativeSnapshot
+    // (see docs/architecture.md — JNI marshalling format).
     fun snapshot(): EngineStateKt {
-        val longs = LongArray(10 + 8 * 3 + 64 * 10)
-        val floats = FloatArray(1 + 8 + 64 * 4)
+        val longs = LongArray(11 + 8 * 3 + 64 * 10)
+        val floats = FloatArray(2 + 8 + 64 * (4 + ENV_BINS))
         nativeSnapshot(handle, longs, floats)
         val banks = (0 until 8).map { i ->
-            val lp = 10 + i * 3
-            val fp = 1 + i
+            val lp = 11 + i * 3
+            val fp = 2 + i
             BankStateKt(
                 id = i,
                 mode = longs[lp].toInt(),
@@ -32,8 +36,8 @@ class EngineBridge {
         }
         val count = longs[1].toInt()
         val samples = (0 until count).map { i ->
-            val lp = 10 + 8*3 + i * 10
-            val fp = 1 + 8 + i * 4
+            val lp = 11 + 8*3 + i * 10
+            val fp = 2 + 8 + i * (4 + ENV_BINS)
             SampleStateKt(
                 id = longs[lp],
                 bank = longs[lp+1].toInt(),
@@ -49,6 +53,7 @@ class EngineBridge {
                 reverse = floats[fp+1] != 0f,
                 positionX = floats[fp+2],
                 positionY = floats[fp+3],
+                envelope = List(ENV_BINS) { k -> floats[fp+4+k] },
             )
         }
         return EngineStateKt(
@@ -63,6 +68,8 @@ class EngineBridge {
             masterPlaying = longs[8] == 1L,
             extraLatencyFrames = longs[9].toInt(),
             bpm = floats[0],
+            inputPeak = floats[1],
+            metronome = longs[10] == 1L,
             version = longs[0],
         )
     }
@@ -78,8 +85,10 @@ class EngineBridge {
         ivalue: Int, bvalue: Boolean
     ): Boolean
     private external fun nativeSnapshot(h: Long, longs: LongArray, floats: FloatArray)
+    private external fun nativeExport(h: Long, dir: String): Int
 
     companion object {
+        const val ENV_BINS = 32   // must match kEnvBins in engine/src/types.h
         init { System.loadLibrary("tap_looper_bridge") }
     }
 }

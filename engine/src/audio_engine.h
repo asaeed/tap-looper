@@ -31,9 +31,15 @@ public:
   void set_round_trip_latency_frames(int frames);
 
   // User-tunable ±offset added on top of the auto-computed round-trip latency.
-  // Positive = delay the recorded offset (loop starts later in the bar);
-  // negative = advance it. Nudge by ±96 frames (2 ms at 48 kHz) by ear.
+  // Positive = play non-master samples EARLIER in the bar (compensates lag);
+  // negative = later. Nudge by ±96 frames (2 ms at 48 kHz) by ear.
   void set_extra_latency_frames(int frames);
+
+  // Export all samples as float32 WAVs plus a session.json with bar/tempo and
+  // per-sample metadata into `dir` (created if missing). Returns the number of
+  // files written. PRECONDITION: audio I/O must be stopped — this walks the
+  // RT-thread-owned sample data directly from the calling thread.
+  int export_session(const char* dir);
 
 private:
     struct Impl;

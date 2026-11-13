@@ -41,10 +41,12 @@ not `src/jvmMain/kotlin/`. This is a deliberate choice; see `docs/development.md
 ```
 TapLooperScreen(vm: AppViewModel)
   ├─ TopBar
-  │    REC indicator (● Xs elapsed, or blank)
-  │    ⎘ CAPTURE button
+  │    Mic level dot (decaying input peak; red when clipping)
+  │    Status text (● Xs while recording / SAVED flash after export / blank)
+  │    ⎘ CAPTURE button (targets focused bank = last-touched bank)
+  │    SAVE button (exports WAVs + session.json to ~/Music/TapLooper/<timestamp>/)
   │    ▶ PLAY / ■ STOP toggle
-  │    RESET button
+  │    RESET button (LONG-PRESS only — a tap must not wipe the session)
   │    Page pips (2 dots, tappable)
   │
   ├─ BankGrid  (2×2 layout, shows 4 banks for current page)
@@ -59,11 +61,9 @@ TapLooperScreen(vm: AppViewModel)
   │         │         └─ SampleBox  (animated visual state)
   │         └─ VolumeStrip  (horizontal level indicator + drag control)
   │
-  ├─ BottomBar
-  │    BPM display
-  │    ÷2 / ×2 (coarse beats-per-bar)
-  │    −0.1 / +0.1 BPM fine-tune  (visible only when master bar exists)
-  │    LAT display + −2 / +2 ms nudge buttons  (same visibility condition)
+  ├─ BottomBar  (two rows; row 2 visible only when master bar exists)
+  │    Row 1: BPM display · ÷2 / ×2 (coarse beats-per-bar) · −0.1 / +0.1 BPM fine-tune
+  │    Row 2: LAT display + −2 / +2 ms nudge · MET metronome toggle
   │
   └─ SampleModal  (overlaid Dialog, shown on long-press)
        Volume slider
@@ -81,19 +81,25 @@ TapLooperScreen(vm: AppViewModel)
 | Gesture | When | Action |
 |---------|------|--------|
 | Press down on empty area | Not recording | Start recording in this bank at the tapped position |
+| …then move > 30 px horizontally | Same gesture | Cancel the just-started recording (`CancelRecording`) and change page instead |
 
 Recording starts on `awaitFirstDown` (press-down event), not on pointer-up. The position
 is normalised to the bank body dimensions and clamped so the resulting SampleBox cannot
-straddle the bank edge (half-box margin applied).
+straddle the bank edge (half-box margin, derived from `SampleBoxWidth/Height`).
+Because most of the screen is empty bank space, a page swipe would otherwise always
+kick off an unwanted recording — the same gesture handler watches for a horizontal
+swipe and converts it into a page change, discarding the recording.
 
 ### Global (anywhere while recording)
 
 | Gesture | Action |
 |---------|--------|
-| Tap anywhere | Stop recording |
+| Press down anywhere | Stop recording |
 
-This is handled by a `detectTapGestures` modifier on the root `Box` in `TapLooperScreen`,
-active only when `state.recording == true`.
+This is handled by an `awaitFirstDown` gesture on the root `Box` in `TapLooperScreen`,
+active only when `state.recording == true`. It fires on press-DOWN (not tap-up):
+recording starts on down, so the loop span must end on down too — otherwise every
+loop is stretched by the click duration.
 
 ### Sample box (`SampleAt`, via `tapLongPressDrag`)
 
@@ -109,13 +115,28 @@ Drag arbitration is implemented in `SampleBoxGestures.kt::tapLongPressDrag`. It 
 - If 500 ms elapses without > 12 px movement → long-press (modal opens).
 - If the pointer lifts before either threshold → tap.
 
+Drag movement accumulates per-event `positionChange()` deltas — NOT
+`position - down.position`, which double-counts when the box moves with the drag or
+when multiple pointer events arrive within one frame.
+
+While a drag is active, the dragged box, its bank cell, and its row are raised via
+`Modifier.zIndex` (`BankGrid.kt` tracks `draggingBank`) so the box draws above the
+other quadrants. On drop, the drag offset is held (`pendingDrop`) until the engine
+round-trips the new position (or 250 ms), so the box doesn't flash back to its old
+spot for a poll cycle. The drop's screen position is computed from the bank BODY's
+origin (`bodyScreenOrigin`), not the whole bank — the header height used to shift
+every drop upward.
+
 The `down.consume()` call on `awaitFirstDown` prevents the bank body's
 `awaitFirstDown(requireUnconsumed = true)` from also seeing the event, so a tap on a
 sample never accidentally starts a new recording.
 
-Cross-bank drop is computed in `TapLooperScreen` by `bankIdAtOffset`, which divides the
-screen into four quadrants per page. The sample's new normalised position within the
-target bank is computed by `localizeToBank`.
+Cross-bank drop mapping uses the banks' actual geometry: each `Bank` reports its body's
+screen rect (`onBodyRect`, sized with the bank constraints — the same basis sample
+positions are normalised against), and `TapLooperScreen` keeps them in `bankBodyRects`.
+On drop, the target is the bank whose rect contains the point (nearest rect centre as
+fallback), and the position is normalised within that rect — the exact inverse of how
+boxes are rendered, so the box lands precisely where it was dropped.
 
 ### Bank header buttons
 
@@ -136,7 +157,18 @@ tall bar at the bottom of each bank.
 
 Horizontal drag of > 30 px anywhere on the screen (when not recording) advances or
 retreats the page. Page 0 shows banks 1–4, page 1 shows banks 5–8. Active page is
-indicated by the two pip dots in TopBar.
+indicated by the two pip dots in TopBar. Swipes starting on empty bank space are
+handled by the bank body gesture (see above), which cancels the press-down recording
+first.
+
+### Keyboard (desktop)
+
+Handled via `onPreviewKeyEvent` in `desktop/…/Main.kt`:
+
+| Key | When | Action |
+|-----|------|--------|
+| any key | Recording | Stop recording |
+| Space | Not recording | Toggle master PLAY / STOP |
 
 ## Sample modal
 
@@ -194,6 +226,16 @@ Bank colors (index 0–7):
 | `Playing` | Solid fill + matching border + glow shadow + BPM-synced pulse scale |
 | `Recording` | Transparent fill + red-orange border + fast pulse (~3 Hz, independent) |
 | `Muted` | No fill + 30% alpha border + 40% overall opacity |
+
+Every box with recorded audio also draws a waveform thumbnail: the sample's 32-bin
+peak envelope (from the engine snapshot), normalised to its own maximum, as mirrored
+vertical bars — black at 35% on playing (solid fill) boxes, bank color at 45% otherwise.
+The box footprint is defined by `SampleBoxWidth` × `SampleBoxHeight` (50×38 dp) in
+`SampleBox.kt`; `Bank.kt` derives its clamp margins from the same constants.
+
+The `playing` flag from the engine is solo/mute-aware: samples in banks silenced by a
+solo elsewhere (or by their own mute) report `playing = false`, so boxes never pulse
+while inaudible.
 
 **BPM pulse**: A single `InfiniteTransition` is created in `TapLooperScreen` for the
 current BPM and produces a `pulsePhase` value (0..1) that is passed all the way down to

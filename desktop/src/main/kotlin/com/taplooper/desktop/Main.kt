@@ -1,6 +1,10 @@
 package com.taplooper.desktop
 
 import androidx.compose.runtime.*
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -18,6 +22,18 @@ fun main() = application {
         onCloseRequest = ::exitApplication,
         title = "Tap Looper",
         state = state,
+        // Keyboard: any key stops an active recording; space toggles play/stop.
+        onPreviewKeyEvent = { e ->
+            if (e.type != KeyEventType.KeyDown) false
+            else {
+                val st = vm.state.value
+                when {
+                    st.recording -> { vm.stopRecording(); true }
+                    e.key == Key.Spacebar -> { vm.setMasterPlaying(!st.masterPlaying); true }
+                    else -> false
+                }
+            }
+        },
     ) {
         TapLooperScreen(vm)
     }

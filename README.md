@@ -7,6 +7,12 @@ in a 2x2 pad grid (two pages = eight banks total). You can drag samples between 
 flip between LOOP and ONE-SHOT mode non-destructively, mute, solo, reverse, and adjust
 playback speed — all while the engine keeps running.
 
+Sample boxes show a waveform thumbnail, a metronome click (MET) can mark the beat, the
+mic level dot in the top bar shows live input, and SAVE exports every sample as a
+float32 WAV plus a `session.json` to `~/Music/TapLooper/<timestamp>/`. On desktop,
+space toggles play/stop and any key stops an active recording. RESET requires a
+long-press.
+
 ## Quick start (macOS)
 
 ```bash

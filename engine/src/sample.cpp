@@ -8,6 +8,7 @@ Sample::Sample(SampleId id_, BankId bank_, Frames capacity_frames_, int channels
     : id(id_),
       recorded_length_frames(0),
       recorded_offset_in_bar(0),
+      recorded_start_total(0),
       pcm(size_t(capacity_frames_) * size_t(channels_), 0.f),
       bank(bank_),
       volume(1.0f),
@@ -23,7 +24,9 @@ Sample::Sample(SampleId id_, BankId bank_, Frames capacity_frames_, int channels
       repeat(false),
       channels(channels_),
       capacity_frames(capacity_frames_),
-      is_master_loop(false) {}
+      is_master_loop(false) {
+    for (int i = 0; i < kEnvBins; ++i) env[i] = 0.f;
+}
 
 void Sample::append(const float* in, Frames frame_count) {
     if (!recording) return;
@@ -34,6 +37,19 @@ void Sample::append(const float* in, Frames frame_count) {
                 in,
                 to_write * channels * sizeof(float));
     recorded_length_frames += to_write;
+}
+
+void Sample::compute_env() {
+    for (int i = 0; i < kEnvBins; ++i) env[i] = 0.f;
+    if (recorded_length_frames == 0) return;
+    for (Frames f = 0; f < recorded_length_frames; ++f) {
+        int bin = int(uint64_t(f) * kEnvBins / recorded_length_frames);
+        for (int ch = 0; ch < channels; ++ch) {
+            float v = pcm[f * channels + ch];
+            if (v < 0) v = -v;
+            if (v > env[bin]) env[bin] = v;
+        }
+    }
 }
 
 } // namespace tl

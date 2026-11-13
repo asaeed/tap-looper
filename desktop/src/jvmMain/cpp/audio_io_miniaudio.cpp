@@ -6,7 +6,32 @@
 #include <memory>
 #include <vector>
 
+#ifdef __APPLE__
+#include <CoreAudio/CoreAudio.h>
+#endif
+
 namespace tl {
+
+#ifdef __APPLE__
+// CoreAudio device latency + safety offset (frames) for one direction.
+// miniaudio's period sizes only cover the ring buffers; the ADC/DAC and driver
+// add several ms that must be part of the round-trip compensation.
+static int coreaudio_device_latency_frames(ma_uint32 device_object_id, bool input) {
+    if (device_object_id == 0) return 0;
+    AudioObjectID dev = AudioObjectID(device_object_id);
+    AudioObjectPropertyScope scope =
+        input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput;
+    UInt32 latency = 0, safety = 0;
+    UInt32 size = sizeof(UInt32);
+    AudioObjectPropertyAddress addr{
+        kAudioDevicePropertyLatency, scope, kAudioObjectPropertyElementMain};
+    AudioObjectGetPropertyData(dev, &addr, 0, nullptr, &size, &latency);
+    addr.mSelector = kAudioDevicePropertySafetyOffset;
+    size = sizeof(UInt32);
+    AudioObjectGetPropertyData(dev, &addr, 0, nullptr, &size, &safety);
+    return int(latency + safety);
+}
+#endif
 
 class MiniaudioIO : public AudioIO {
 public:
@@ -45,9 +70,14 @@ public:
         // Compute round-trip latency in frames and report it to the engine
         int input_frames  = int(device_.capture.internalPeriodSizeInFrames  * device_.capture.internalPeriods);
         int output_frames = int(device_.playback.internalPeriodSizeInFrames * device_.playback.internalPeriods);
-        int round_trip = input_frames + output_frames;
-        std::fprintf(stderr, "[miniaudio] round_trip_latency_frames=%d (input=%d, output=%d)\n",
-                     round_trip, input_frames, output_frames);
+        int device_extra = 0;
+#ifdef __APPLE__
+        device_extra = coreaudio_device_latency_frames(device_.coreaudio.deviceObjectIDCapture, true)
+                     + coreaudio_device_latency_frames(device_.coreaudio.deviceObjectIDPlayback, false);
+#endif
+        int round_trip = input_frames + output_frames + device_extra;
+        std::fprintf(stderr, "[miniaudio] round_trip_latency_frames=%d (input=%d, output=%d, device=%d)\n",
+                     round_trip, input_frames, output_frames, device_extra);
         engine.set_round_trip_latency_frames(round_trip);
 
         return true;

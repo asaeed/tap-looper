@@ -13,6 +13,10 @@ class AppViewModel {
     private val _state = MutableStateFlow(bridge.snapshot())
     val state: StateFlow<EngineStateKt> = _state
 
+    // Set to the target directory after each successful export (UI flashes a confirmation).
+    private val _lastExportDir = MutableStateFlow<String?>(null)
+    val lastExportDir: StateFlow<String?> = _lastExportDir
+
     init {
         scope.launch {
             while (isActive) {
@@ -52,11 +56,23 @@ class AppViewModel {
     fun setBankSolo(bank: Int, soloed: Boolean) =
         bridge.submit(CT.SetBankSolo, bank = bank, bvalue = soloed)
     fun setSampleStartOffset(id: Long, frames: Int) =
-        bridge.submit(com.taplooper.bridge.CommandType.SetSampleStartOffset, sampleId = id, ivalue = frames)
+        bridge.submit(CT.SetSampleStartOffset, sampleId = id, ivalue = frames)
     fun setMasterBarFrames(frames: Int) =
-        bridge.submit(com.taplooper.bridge.CommandType.SetMasterBarFrames, ivalue = frames)
+        bridge.submit(CT.SetMasterBarFrames, ivalue = frames)
     fun setSampleRepeat(id: Long, repeat: Boolean) =
-        bridge.submit(com.taplooper.bridge.CommandType.SetSampleRepeat, sampleId = id, bvalue = repeat)
+        bridge.submit(CT.SetSampleRepeat, sampleId = id, bvalue = repeat)
     fun setExtraLatencyFrames(frames: Int) =
-        bridge.submit(com.taplooper.bridge.CommandType.SetExtraLatencyFrames, ivalue = frames)
+        bridge.submit(CT.SetExtraLatencyFrames, ivalue = frames)
+    fun cancelRecording() = bridge.submit(CT.CancelRecording)
+    fun setMetronome(on: Boolean) = bridge.submit(CT.SetMetronome, bvalue = on)
+
+    // Export all samples as WAVs + session.json to ~/Music/TapLooper/<timestamp>/.
+    // Runs off the UI thread; audio pauses briefly while the engine walks its data.
+    fun exportSession() {
+        scope.launch {
+            val ts = java.text.SimpleDateFormat("yyyyMMdd-HHmmss").format(java.util.Date())
+            val dir = "${System.getProperty("user.home")}/Music/TapLooper/$ts"
+            if (bridge.export(dir) > 0) _lastExportDir.value = dir
+        }
+    }
 }

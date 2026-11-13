@@ -15,6 +15,7 @@ data class SampleStateKt(
     val recordedOffsetInBar: Int,
     val startOffsetFrames: Int,
     val repeat: Boolean,
+    val envelope: List<Float>,   // 32-bin waveform peaks for the UI thumbnail
 )
 
 data class BankStateKt(
@@ -37,5 +38,7 @@ data class EngineStateKt(
     val masterPlaying: Boolean,
     val extraLatencyFrames: Int,
     val bpm: Float,
+    val inputPeak: Float,        // decaying mic input peak (0..1)
+    val metronome: Boolean,
     val version: Long,
 )

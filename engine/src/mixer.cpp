@@ -1,5 +1,6 @@
 #include "mixer.h"
 #include <algorithm>
+#include <cmath>
 
 namespace tl {
 
@@ -25,6 +26,15 @@ inline float speed_ratio(Speed sp) {
     default:            return 1.0f;
     }
 }
+
+// Map an output-frame position within a play window to a PCM read position:
+// scale by speed, rotate by start_offset, wrap into [0, sample_len).
+inline float pcm_position(Frames local_out, float speed, int32_t start_offset, Frames sample_len) {
+    float p = float(local_out) * speed + float(start_offset);
+    p = std::fmod(p, float(sample_len));
+    if (p < 0.f) p += float(sample_len);
+    return p;
+}
 } // namespace
 
 Frames nearest_multiple_of_L(Frames sample_len, Frames L) {
@@ -43,7 +53,7 @@ Frames nearest_multiple_of_L(Frames sample_len, Frames L) {
 void mix(const std::vector<Sample*>& samples,
          const BankState* banks,
          Frames bar_frames,
-         Frames play_head,
+         uint64_t play_head,
          int frame_count,
          float* out,
          int extra_latency_frames) {
@@ -87,99 +97,75 @@ void mix(const std::vector<Sample*>& samples,
         }
         if (!s.enabled) continue;
 
-        // For sub-bar samples, fire at `recorded_offset_in_bar` every bar.
-        Frames offset = s.recorded_offset_in_bar;
-        // Non-master samples shift by extra_latency_frames so the user can dial
-        // in alignment with the master loop by ear. Master stays fixed.
-        if (!s.is_master_loop && extra_latency_frames != 0 && bar_frames > 0) {
-            int64_t shifted = int64_t(offset) - int64_t(extra_latency_frames);
-            int64_t L = int64_t(bar_frames);
-            int64_t mod = ((shifted % L) + L) % L;
-            offset = Frames(mod);
-        }
+        // Grid offset for this sample. Non-master samples also shift by
+        // extra_latency_frames so the user can dial alignment live; the result
+        // is always normalized into [0, bar_frames) because SetMasterBarFrames
+        // can shrink the bar below a previously recorded offset.
+        int64_t L64 = int64_t(bar_frames);
+        int64_t shifted = int64_t(s.recorded_offset_in_bar);
+        if (!s.is_master_loop) shifted -= int64_t(extra_latency_frames);
+        Frames offset = Frames(((shifted % L64) + L64) % L64);
+
         Frames sample_len = s.recorded_length_frames;
+        float speed = speed_ratio(s.speed);
+        // One full pass through the PCM measured in OUTPUT frames: at 2x speed
+        // the sample finishes in half its recorded length; at 1/2x it takes double.
+        Frames play_len = Frames(float(sample_len) / speed);
+        if (play_len == 0) play_len = 1;
 
         if (s.repeat) {
-            // Tile the sample across the bar. Tile size is measured in OUTPUT frames
-            // (accounting for playback speed) — at 2x speed the sample finishes in
-            // sample_len/2 output frames, so it should tile twice per bar. At 1/2 speed
-            // it takes 2*sample_len output frames; if that overflows the bar, trim.
-            float speed = speed_ratio(s.speed);
-            Frames effective_play_len = (speed > 0.f)
-                ? Frames(float(sample_len) / speed)
-                : sample_len;
-            Frames tile_len = (effective_play_len < bar_frames) ? effective_play_len : bar_frames;
-            if (tile_len == 0) continue;
+            // Tile the sample continuously across the bar starting from offset.
+            Frames tile_len = (play_len < bar_frames) ? play_len : bar_frames;
             for (int i = 0; i < frame_count; ++i) {
-                Frames bar_pos = (play_head + Frames(i)) % bar_frames;
+                Frames bar_pos = Frames((play_head + uint64_t(i)) % bar_frames);
                 Frames anchored = (bar_pos + bar_frames - offset) % bar_frames;
                 Frames local = anchored % tile_len;
-                // Apply start_offset rotation
-                int32_t off = s.start_offset_frames;
-                int64_t shifted = int64_t(local) + int64_t(off);
-                int64_t len = int64_t(tile_len);
-                int64_t mod = ((shifted % len) + len) % len;
-                Frames effective_local = Frames(mod);
-                float pos = float(effective_local) * speed;
+                float pos = pcm_position(local, speed, s.start_offset_frames, sample_len);
                 for (int c = 0; c < kChannels; ++c) {
                     out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
                 }
             }
         } else if (sample_len <= bar_frames) {
-            // Sub-bar: existing window logic (unchanged)
+            // Sub-bar: plays once per bar in a window of play_len output frames
+            // (speed-adjusted), with wrap handling at the bar boundary.
+            Frames window = (play_len < bar_frames) ? play_len : bar_frames;
             for (int i = 0; i < frame_count; ++i) {
-                Frames bar_pos = (play_head + Frames(i)) % bar_frames;
+                Frames bar_pos = Frames((play_head + uint64_t(i)) % bar_frames);
                 bool inside = false;
                 Frames local = 0;
-                if (offset + sample_len <= bar_frames) {
-                    if (bar_pos >= offset && bar_pos < offset + sample_len) {
+                if (offset + window <= bar_frames) {
+                    if (bar_pos >= offset && bar_pos < offset + window) {
                         inside = true; local = bar_pos - offset;
                     }
                 } else {
                     if (bar_pos >= offset) {
                         inside = true; local = bar_pos - offset;
-                    } else if (bar_pos < (offset + sample_len) % bar_frames) {
+                    } else if (bar_pos < (offset + window) % bar_frames) {
                         inside = true; local = (bar_frames - offset) + bar_pos;
                     }
                 }
                 if (!inside) continue;
-                // Apply the per-sample start offset (rotates the playback within the PCM)
-                int32_t off = s.start_offset_frames;
-                Frames effective_local;
-                if (s.recorded_length_frames == 0) {
-                    effective_local = 0;
-                } else {
-                    int64_t shifted = int64_t(local) + int64_t(off);
-                    int64_t len = int64_t(s.recorded_length_frames);
-                    int64_t mod = ((shifted % len) + len) % len;
-                    effective_local = Frames(mod);
-                }
-                float pos = float(effective_local) * speed_ratio(s.speed);
+                float pos = pcm_position(local, speed, s.start_offset_frames, sample_len);
                 for (int c = 0; c < kChannels; ++c) {
                     out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
                 }
             }
         } else {
-            // Multi-bar: loop_length = nearest_multiple_of_L (unchanged)
-            Frames loop_len = nearest_multiple_of_L(sample_len, bar_frames);
-            // The sample's iteration starts at bar 0 of the master grid (offset 0 by spec).
-            // We need a position within the loop iteration: loop_pos in [0, loop_len).
+            // Multi-bar: iteration length snaps to the nearest bar multiple of the
+            // sample's effective (speed-adjusted) play length. Content is anchored
+            // at the timeline position where recording started (mod loop_len), so
+            // it plays back at the exact grid position it was performed at —
+            // anchoring at bar 0 rotated overdubs by their start position.
+            Frames loop_len = nearest_multiple_of_L(play_len, bar_frames);
+            int64_t anchor64 = s.recorded_start_total;
+            if (!s.is_master_loop) anchor64 -= int64_t(extra_latency_frames);
+            int64_t ll = int64_t(loop_len);
+            Frames anchor = Frames(((anchor64 % ll) + ll) % ll);
             for (int i = 0; i < frame_count; ++i) {
-                Frames absolute = (play_head + Frames(i)) % loop_len;
-                if (absolute >= sample_len) continue; // trailing silence within iteration
-                Frames local = absolute; // reverse handled by read_sample_lerp
-                // Apply the per-sample start offset (rotates the playback within the PCM)
-                int32_t off = s.start_offset_frames;
-                Frames effective_local;
-                if (s.recorded_length_frames == 0) {
-                    effective_local = 0;
-                } else {
-                    int64_t shifted = int64_t(local) + int64_t(off);
-                    int64_t len = int64_t(s.recorded_length_frames);
-                    int64_t mod = ((shifted % len) + len) % len;
-                    effective_local = Frames(mod);
-                }
-                float pos = float(effective_local) * speed_ratio(s.speed);
+                Frames absolute = Frames((play_head + uint64_t(i)) % loop_len);
+                Frames local = (absolute + loop_len - anchor) % loop_len;
+                if (local >= play_len) continue; // trailing silence within iteration
+                float pos = pcm_position(local, speed, s.start_offset_frames, sample_len);
                 for (int c = 0; c < kChannels; ++c) {
                     out[i * kChannels + c] += read_sample_lerp(s, pos, c) * gain;
                 }
